@@ -1,5 +1,14 @@
 export type TaskStatus = "backlog" | "active" | "done";
 
+export interface Attachment {
+  id: string;
+  taskId: string;
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  createdAt: string;
+}
+
 export type SessionStatus = "pending" | "provisioning" | "running" | "done" | "failed";
 
 export interface Project {

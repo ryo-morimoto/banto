@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import type { Task, Session } from "@/shared/types.ts";
+import { useState, useEffect, useCallback, useRef } from "react";
+import type { Task, Session, Attachment } from "@/shared/types.ts";
+import { sendNotification } from "@/client/notifications.ts";
 import {
   activateTask,
   completeTask,
@@ -7,6 +8,9 @@ import {
   pinTask,
   unpinTask,
   updateTaskDescription,
+  listAttachments,
+  uploadAttachment,
+  deleteAttachment,
 } from "./api.ts";
 import { listSessionsByTask, startSession } from "@/client/sessions/api.ts";
 import { SessionLog } from "@/client/sessions/SessionLog.tsx";
@@ -128,14 +132,58 @@ function DescriptionEditor({
 
 export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => void }) {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   const refreshSessions = useCallback(async () => {
     setSessions(await listSessionsByTask(task.id));
   }, [task.id]);
 
+  const refreshAttachments = useCallback(async () => {
+    setAttachments(await listAttachments(task.id));
+  }, [task.id]);
+
   useEffect(() => {
     refreshSessions();
-  }, [refreshSessions]);
+    refreshAttachments();
+  }, [refreshSessions, refreshAttachments]);
+
+  // Paste event listener for image uploads
+  useEffect(() => {
+    function handlePaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.type.startsWith("image/")) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            uploadAttachment(task.id, file).then(() => refreshAttachments());
+          }
+          return;
+        }
+      }
+    }
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [task.id, refreshAttachments]);
+
+  // Track previous session statuses for notification detection
+  const prevStatusesRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    const prev = prevStatusesRef.current;
+    for (const session of sessions) {
+      const prevStatus = prev.get(session.id);
+      if (prevStatus && prevStatus !== session.status) {
+        if (session.status === "done") {
+          sendNotification("banto", `セッション完了: ${task.title}`);
+        } else if (session.status === "failed") {
+          sendNotification("banto", `セッション失敗: ${task.title}`);
+        }
+      }
+    }
+    prevStatusesRef.current = new Map(sessions.map((s) => [s.id, s.status]));
+  }, [sessions, task.title]);
 
   // Poll sessions every 2s when there's an active session
   useEffect(() => {
@@ -174,6 +222,40 @@ export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => v
       </div>
 
       <DescriptionEditor taskId={task.id} initial={task.description} onSaved={onUpdated} />
+
+      {attachments.length > 0 && (
+        <div className="mb-4">
+          <h3 className="text-xs font-bold mb-2 text-gray-500">
+            Attachments ({attachments.length})
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {attachments.map((a) => (
+              <div key={a.id} className="relative group">
+                <img
+                  src={`/api/attachments/${a.id}/file`}
+                  alt={a.originalName}
+                  className="w-20 h-20 object-cover rounded border"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await deleteAttachment(a.id);
+                    refreshAttachments();
+                  }}
+                  className="absolute -top-1 -right-1 hidden group-hover:block bg-red-500 text-white rounded-full w-4 h-4 text-xs leading-4 text-center"
+                >
+                  x
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="text-xs text-gray-400 mt-1">画像をクリップボードから貼り付けできます</div>
+        </div>
+      )}
+
+      {attachments.length === 0 && (
+        <div className="mb-4 text-xs text-gray-400">画像をクリップボードから貼り付けできます</div>
+      )}
 
       <div className="flex flex-wrap gap-2 mb-6">
         {task.status === "backlog" && (

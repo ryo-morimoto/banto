@@ -50,4 +50,15 @@ db.run(`
   )
 `);
 
+db.run(`
+  CREATE TABLE IF NOT EXISTS attachments (
+    id            TEXT PRIMARY KEY,
+    task_id       TEXT NOT NULL REFERENCES tasks(id),
+    filename      TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    mime_type     TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`);
+
 export { db };

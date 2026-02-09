@@ -6,6 +6,7 @@ import { createSessionRepository } from "./repository.ts";
 import { createSessionService } from "./service.ts";
 import { createRunner, createMockRunner } from "./runner.ts";
 import { logStore } from "./log-store.ts";
+import { attachmentService } from "../attachments/routes.ts";
 
 const taskRepo = createTaskRepository(db);
 const projectRepo = createProjectRepository(db);
@@ -15,7 +16,7 @@ const service = createSessionService(sessionRepo, taskRepo);
 const runner =
   process.env["BANTO_MOCK_RUNNER"] === "1"
     ? createMockRunner(service)
-    : createRunner(service, taskRepo, projectRepo);
+    : createRunner(service, taskRepo, projectRepo, attachmentService);
 
 export const sessionRoutes = new Elysia({ prefix: "/sessions" })
   .get("/task/:taskId", ({ params }) => service.findByTaskId(params.taskId))

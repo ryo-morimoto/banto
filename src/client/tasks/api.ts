@@ -58,3 +58,22 @@ export async function updateTaskDescription(id: string, description: string) {
   const { data } = await api.api.tasks({ id }).description.patch({ description });
   return data!;
 }
+
+export async function listAttachments(taskId: string) {
+  const res = await fetch(`/api/attachments/task/${taskId}`);
+  return res.json();
+}
+
+export async function uploadAttachment(taskId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/attachments/task/${taskId}`, {
+    method: "POST",
+    body: form,
+  });
+  return res.json();
+}
+
+export async function deleteAttachment(id: string) {
+  await fetch(`/api/attachments/${id}`, { method: "DELETE" });
+}

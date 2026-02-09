@@ -25,10 +25,18 @@ export async function runAgent(opts: {
   task: Task;
   project: Project;
   branch: string;
+  attachmentPaths?: string[];
   onSessionId: (id: string) => void;
   signal?: AbortSignal;
 }): Promise<AgentResult> {
-  const prompt = [opts.task.title, opts.task.description].filter(Boolean).join("\n\n");
+  const parts = [opts.task.title, opts.task.description].filter(Boolean);
+  if (opts.attachmentPaths && opts.attachmentPaths.length > 0) {
+    parts.push(
+      "The following screenshot images are attached for reference. Use the Read tool to view them:",
+      ...opts.attachmentPaths.map((p) => `- ${p}`),
+    );
+  }
+  const prompt = parts.join("\n\n");
 
   const abortController = new AbortController();
   if (opts.signal) {

@@ -7,6 +7,7 @@ import { ProjectManager } from "@/client/projects/ProjectManager.tsx";
 import { CreateTask } from "@/client/tasks/CreateTask.tsx";
 import { TaskListPanel } from "@/client/tasks/TaskList.tsx";
 import { TaskDetail } from "@/client/tasks/TaskDetail.tsx";
+import { requestNotificationPermission } from "@/client/notifications.ts";
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -36,6 +37,7 @@ function App() {
   }, [refreshProjects, refreshTasks]);
 
   useEffect(() => {
+    requestNotificationPermission();
     refreshAll();
     const interval = setInterval(refreshTasks, 5000);
     return () => clearInterval(interval);
