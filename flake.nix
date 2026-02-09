@@ -66,7 +66,6 @@
                 Type = "simple";
                 User = "ryo-morimoto";
                 StateDirectory = "banto";
-                WorkingDirectory = "/var/lib/banto/app";
 
                 ExecStartPre = pkgs.writeShellScript "banto-prepare" ''
                   mkdir -p /var/lib/banto/app
@@ -75,7 +74,10 @@
                   ${pkgs.bun}/bin/bun install --frozen-lockfile
                 '';
 
-                ExecStart = "${pkgs.bun}/bin/bun run src/server.ts";
+                ExecStart = pkgs.writeShellScript "banto-start" ''
+                  cd /var/lib/banto/app
+                  exec ${pkgs.bun}/bin/bun run src/server.ts
+                '';
 
                 Restart = "on-failure";
                 RestartSec = 5;
