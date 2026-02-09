@@ -1,0 +1,36 @@
+{
+  "name": "banto",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --hot src/server.ts",
+    "test": "bun test",
+    "typecheck": "tsgo --noEmit",
+    "fmt": "oxfmt --write src/",
+    "fmt:check": "oxfmt --check src/",
+    "lint": "oxlint src/"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "@typescript/native-preview": "^7.0.0-dev.20260209.1",
+    "bun-plugin-tailwind": "^0.1.2",
+    "oxfmt": "^0.28.0",
+    "oxlint": "^1.43.0",
+    "tailwindcss": "^4.1.18"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.37",
+    "@elysiajs/eden": "^1.4.6",
+    "@elysiajs/static": "^1.4.7",
+    "@tanstack/react-query": "^5.90.20",
+    "@tanstack/react-router": "^1.159.5",
+    "elysia": "^1.4.23",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}

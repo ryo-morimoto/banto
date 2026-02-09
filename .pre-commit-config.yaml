@@ -1,0 +1,26 @@
+repos:
+  - repo: local
+    hooks:
+      - id: fmt
+        name: oxfmt
+        entry: bun run fmt:check
+        language: system
+        pass_filenames: false
+
+      - id: lint
+        name: oxlint
+        entry: bun run lint
+        language: system
+        pass_filenames: false
+
+      - id: typecheck
+        name: tsgo
+        entry: bun run typecheck
+        language: system
+        pass_filenames: false
+
+      - id: test
+        name: bun test
+        entry: bun test
+        language: system
+        pass_filenames: false
