@@ -36,5 +36,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # sqlite
 *.sqlite
 
+# compiled binary
+/server
+
 # omc
 .omc/

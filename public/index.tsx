@@ -1,3 +1,4 @@
+import "./global.css";
 import { StrictMode, useState, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import type { Project, Task } from "@/shared/types.ts";
