@@ -51,6 +51,7 @@
               description = "banto task dashboard";
               after = [ "network.target" ];
               wantedBy = [ "multi-user.target" ];
+              restartTriggers = [ bantoPackage ];
 
               path = [
                 pkgs.bun
