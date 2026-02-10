@@ -2,6 +2,18 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { Task, Project } from "../../shared/types.ts";
 import { logStore } from "./log-store.ts";
 
+// The Agent SDK resolves the CLI path from its own location by default,
+// but under bun compile this points to the virtual FS (/$bunfs/root/cli.js).
+// A relative path like "claude" fails the SDK's existsSync check too,
+// so we require an absolute path via CLAUDE_CODE_EXECUTABLE env var.
+function resolveClaudeExecutable(): string {
+  const path = process.env.CLAUDE_CODE_EXECUTABLE;
+  if (!path) {
+    throw new Error("CLAUDE_CODE_EXECUTABLE env var is required");
+  }
+  return path;
+}
+
 export interface AgentResult {
   sessionId: string;
   success: boolean;
@@ -56,6 +68,7 @@ export async function runAgent(opts: {
       allowDangerouslySkipPermissions: true,
       abortController,
       settingSources: ["project"],
+      pathToClaudeCodeExecutable: resolveClaudeExecutable(),
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
