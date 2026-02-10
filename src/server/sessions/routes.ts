@@ -8,7 +8,7 @@ import { createRunner, createMockRunner } from "./runner.ts";
 import { recoverStaleSessions } from "./recovery.ts";
 import { removeWorktree } from "./worktree.ts";
 import { logStore } from "./log-store.ts";
-import { attachmentService } from "../attachments/routes.ts";
+import { attachmentService } from "../attachments/instance.ts";
 
 const taskRepo = createTaskRepository(db);
 const projectRepo = createProjectRepository(db);
