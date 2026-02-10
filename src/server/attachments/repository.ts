@@ -43,7 +43,7 @@ export function createAttachmentRepository(db: Database) {
       filename: string;
       originalName: string;
       mimeType: string;
-    }): void {
+    }): Attachment {
       db.query(
         "INSERT INTO attachments (id, task_id, filename, original_name, mime_type) VALUES (?, ?, ?, ?, ?)",
       ).run(
@@ -53,6 +53,7 @@ export function createAttachmentRepository(db: Database) {
         attachment.originalName,
         attachment.mimeType,
       );
+      return this.findById(attachment.id)!;
     },
 
     delete(id: string): void {

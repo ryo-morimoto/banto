@@ -13,8 +13,7 @@ export function createAttachmentService(repo: AttachmentRepository, storageDir: 
       const taskDir = join(storageDir, taskId);
       mkdirSync(taskDir, { recursive: true });
       await Bun.write(join(taskDir, filename), data);
-      repo.insert({ id, taskId, filename, originalName, mimeType });
-      return repo.findById(id)!;
+      return repo.insert({ id, taskId, filename, originalName, mimeType });
     },
 
     listByTaskId(taskId: string) {

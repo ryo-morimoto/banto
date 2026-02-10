@@ -8,8 +8,7 @@ export function createProjectService(repo: ProjectRepository) {
 
     create(input: { name: string; localPath: string; repoUrl?: string }) {
       const id = crypto.randomUUID();
-      repo.insert({ id, ...input });
-      return repo.findById(id)!;
+      return repo.insert({ id, ...input });
     },
 
     remove(id: string) {

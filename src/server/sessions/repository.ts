@@ -90,11 +90,12 @@ export function createSessionRepository(db: Database) {
       return rows.map(toSession);
     },
 
-    insert(session: { id: string; taskId: string }): void {
+    insert(session: { id: string; taskId: string }): Session {
       db.query("INSERT INTO sessions (id, task_id) VALUES (?, ?)").run(session.id, session.taskId);
+      return this.findById(session.id)!;
     },
 
-    updateStatus(id: string, status: string, fields?: Record<string, string>): void {
+    updateStatus(id: string, status: string, fields?: Record<string, string>): Session {
       if (fields && Object.keys(fields).length > 0) {
         const sets = ["status = ?"];
         const values: string[] = [status];
@@ -107,6 +108,7 @@ export function createSessionRepository(db: Database) {
       } else {
         db.query("UPDATE sessions SET status = ? WHERE id = ?").run(status, id);
       }
+      return this.findById(id)!;
     },
   };
 }

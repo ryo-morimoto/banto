@@ -13,8 +13,7 @@ export function createSessionService(sessionRepo: SessionRepository, taskRepo: T
       if (active) throw new Error("Task already has an active session");
 
       const id = crypto.randomUUID();
-      sessionRepo.insert({ id, taskId });
-      return sessionRepo.findById(id)!;
+      return sessionRepo.insert({ id, taskId });
     },
 
     markProvisioning(id: string, containerName: string, worktreePath: string) {
@@ -22,11 +21,10 @@ export function createSessionService(sessionRepo: SessionRepository, taskRepo: T
       if (!session) throw new Error("Session not found");
       if (session.status !== "pending")
         throw new Error(`Cannot provision session in ${session.status} status`);
-      sessionRepo.updateStatus(id, "provisioning", {
+      return sessionRepo.updateStatus(id, "provisioning", {
         container_name: containerName,
         worktree_path: worktreePath,
       });
-      return sessionRepo.findById(id)!;
     },
 
     markRunning(id: string, ccSessionId: string, branch: string) {
@@ -34,8 +32,7 @@ export function createSessionService(sessionRepo: SessionRepository, taskRepo: T
       if (!session) throw new Error("Session not found");
       if (session.status !== "provisioning")
         throw new Error(`Cannot mark running session in ${session.status} status`);
-      sessionRepo.updateStatus(id, "running", { cc_session_id: ccSessionId, branch });
-      return sessionRepo.findById(id)!;
+      return sessionRepo.updateStatus(id, "running", { cc_session_id: ccSessionId, branch });
     },
 
     markDone(id: string) {
@@ -43,8 +40,7 @@ export function createSessionService(sessionRepo: SessionRepository, taskRepo: T
       if (!session) throw new Error("Session not found");
       if (session.status !== "running")
         throw new Error(`Cannot complete session in ${session.status} status`);
-      sessionRepo.updateStatus(id, "done", { completed_at: new Date().toISOString() });
-      return sessionRepo.findById(id)!;
+      return sessionRepo.updateStatus(id, "done", { completed_at: new Date().toISOString() });
     },
 
     markFailed(id: string, error: string) {
@@ -52,11 +48,10 @@ export function createSessionService(sessionRepo: SessionRepository, taskRepo: T
       if (!session) throw new Error("Session not found");
       if (session.status === "done" || session.status === "failed")
         throw new Error(`Cannot fail session in ${session.status} status`);
-      sessionRepo.updateStatus(id, "failed", {
+      return sessionRepo.updateStatus(id, "failed", {
         error,
         completed_at: new Date().toISOString(),
       });
-      return sessionRepo.findById(id)!;
     },
 
     findByTaskId(taskId: string) {

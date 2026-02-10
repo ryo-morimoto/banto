@@ -58,25 +58,29 @@ export function createTaskRepository(db: Database) {
       return rows.map(toTask);
     },
 
-    insert(task: { id: string; projectId: string; title: string; description?: string }): void {
+    insert(task: { id: string; projectId: string; title: string; description?: string }): Task {
       db.query("INSERT INTO tasks (id, project_id, title, description) VALUES (?, ?, ?, ?)").run(
         task.id,
         task.projectId,
         task.title,
         task.description ?? null,
       );
+      return this.findById(task.id)!;
     },
 
-    updateStatus(id: string, status: string): void {
+    updateStatus(id: string, status: string): Task {
       db.query("UPDATE tasks SET status = ? WHERE id = ?").run(status, id);
+      return this.findById(id)!;
     },
 
-    updatePinned(id: string, pinned: boolean): void {
+    updatePinned(id: string, pinned: boolean): Task {
       db.query("UPDATE tasks SET pinned = ? WHERE id = ?").run(pinned ? 1 : 0, id);
+      return this.findById(id)!;
     },
 
-    updateDescription(id: string, description: string): void {
+    updateDescription(id: string, description: string): Task {
       db.query("UPDATE tasks SET description = ? WHERE id = ?").run(description, id);
+      return this.findById(id)!;
     },
   };
 }

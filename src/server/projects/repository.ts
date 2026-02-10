@@ -33,13 +33,14 @@ export function createProjectRepository(db: Database) {
       return row ? toProject(row) : null;
     },
 
-    insert(project: { id: string; name: string; repoUrl?: string; localPath: string }): void {
+    insert(project: { id: string; name: string; repoUrl?: string; localPath: string }): Project {
       db.query("INSERT INTO projects (id, name, repo_url, local_path) VALUES (?, ?, ?, ?)").run(
         project.id,
         project.name,
         project.repoUrl ?? null,
         project.localPath,
       );
+      return this.findById(project.id)!;
     },
 
     remove(id: string): void {
