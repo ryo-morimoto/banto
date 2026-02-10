@@ -1,10 +1,14 @@
-import { Elysia } from "elysia";
-import { staticPlugin } from "@elysiajs/static";
+import homepage from "./public/index.html";
 import { app } from "./server/app.ts";
 
-const server = new Elysia()
-  .use(await staticPlugin({ prefix: "/", assets: "src/public" }))
-  .use(app)
-  .listen({ hostname: "0.0.0.0", port: 3000 });
+const server = Bun.serve({
+  routes: {
+    "/": homepage,
+  },
+  fetch: (req) => app.fetch(req),
+  hostname: "0.0.0.0",
+  port: 3000,
+  development: process.env.NODE_ENV !== "production",
+});
 
-console.log(`banto running at http://${server.server?.hostname}:${server.server?.port}`);
+console.log(`banto running at http://${server.hostname}:${server.port}`);

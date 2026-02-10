@@ -76,6 +76,7 @@
 
                 ExecStart = pkgs.writeShellScript "banto-start" ''
                   cd /var/lib/banto/app
+                  export NODE_ENV=production
                   exec ${pkgs.bun}/bin/bun run src/server.ts
                 '';
 
