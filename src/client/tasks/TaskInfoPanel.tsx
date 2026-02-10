@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import type { Task, Session, Attachment } from "../../shared/types.ts";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Task } from "../../shared/types.ts";
 import {
   activateTask,
   completeTask,
@@ -7,11 +8,13 @@ import {
   pinTask,
   unpinTask,
   updateTaskDescription,
-  listAttachments,
-  uploadAttachment,
-  deleteAttachment,
 } from "./api.ts";
 import { startSession } from "../sessions/api.ts";
+import { uploadAttachment, deleteAttachment } from "../attachments/api.ts";
+import { taskQueries } from "./queries.ts";
+import { sessionQueries } from "../sessions/queries.ts";
+import { attachmentQueries } from "../attachments/queries.ts";
+import { sendNotification } from "../notifications.ts";
 
 function isActiveSession(status: string) {
   return status === "pending" || status === "provisioning" || status === "running";
@@ -94,27 +97,32 @@ function DescriptionEditor({
   );
 }
 
-export function TaskInfoPanel({
-  task,
-  latestSession,
-  onUpdated,
-  onSessionStarted,
-}: {
-  task: Task;
-  latestSession: Session | null;
-  onUpdated: () => void;
-  onSessionStarted: () => void;
-}) {
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+export function TaskInfoPanel({ task }: { task: Task }) {
+  const queryClient = useQueryClient();
+  const { data: attachments = [] } = useQuery(attachmentQueries.byTask(task.id));
+  const sessionsQuery = useQuery(sessionQueries.byTask(task.id));
+  const latestSession = sessionsQuery.data?.[0] ?? null;
 
-  const refreshAttachments = useCallback(async () => {
-    setAttachments(await listAttachments(task.id));
-  }, [task.id]);
+  // Notification status tracking
+  const prevStatusRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
-    refreshAttachments();
-  }, [refreshAttachments]);
+    if (!sessionsQuery.data) return;
+    for (const session of sessionsQuery.data) {
+      const prev = prevStatusRef.current.get(session.id);
+      if (prev && prev !== session.status) {
+        if (session.status === "done" || session.status === "failed") {
+          sendNotification(
+            "banto",
+            `セッション${session.status === "done" ? "完了" : "失敗"}: ${task.title}`,
+          );
+        }
+      }
+      prevStatusRef.current.set(session.id, session.status);
+    }
+  }, [sessionsQuery.data, task.title]);
 
+  // Paste to upload attachment
   useEffect(() => {
     function handlePaste(e: ClipboardEvent) {
       const items = e.clipboardData?.items;
@@ -124,7 +132,11 @@ export function TaskInfoPanel({
           e.preventDefault();
           const file = item.getAsFile();
           if (file) {
-            uploadAttachment(task.id, file).then(() => refreshAttachments());
+            uploadAttachment(task.id, file).then(() =>
+              queryClient.invalidateQueries({
+                queryKey: attachmentQueries.byTask(task.id).queryKey,
+              }),
+            );
           }
           return;
         }
@@ -132,16 +144,25 @@ export function TaskInfoPanel({
     }
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
-  }, [task.id, refreshAttachments]);
+  }, [task.id, queryClient]);
+
+  function handleTaskUpdated() {
+    queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+  }
 
   async function handleAction(action: () => Promise<unknown>) {
     await action();
-    onUpdated();
+    handleTaskUpdated();
   }
 
   async function handleStartSession() {
     await startSession(task.id);
-    onSessionStarted();
+    queryClient.invalidateQueries({ queryKey: sessionQueries.byTask(task.id).queryKey });
+  }
+
+  async function handleDeleteAttachment(id: string) {
+    await deleteAttachment(id);
+    queryClient.invalidateQueries({ queryKey: attachmentQueries.byTask(task.id).queryKey });
   }
 
   const hasActiveSession = latestSession ? isActiveSession(latestSession.status) : false;
@@ -156,7 +177,7 @@ export function TaskInfoPanel({
         </div>
       </div>
 
-      <DescriptionEditor taskId={task.id} initial={task.description} onSaved={onUpdated} />
+      <DescriptionEditor taskId={task.id} initial={task.description} onSaved={handleTaskUpdated} />
 
       {attachments.length > 0 && (
         <div className="mb-4">
@@ -173,10 +194,7 @@ export function TaskInfoPanel({
                 />
                 <button
                   type="button"
-                  onClick={async () => {
-                    await deleteAttachment(a.id);
-                    refreshAttachments();
-                  }}
+                  onClick={() => handleDeleteAttachment(a.id)}
                   className="absolute -top-1 -right-1 hidden group-hover:block bg-red-500 text-white rounded-full w-4 h-4 text-xs leading-4 text-center"
                 >
                   x

@@ -1,9 +1,7 @@
 import "./global.css";
-import { StrictMode, useState, useEffect, useCallback } from "react";
+import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Session } from "../src/shared/types.ts";
-import { listSessionsByTask } from "../src/client/sessions/api.ts";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { ProjectManager } from "../src/client/projects/ProjectManager.tsx";
 import { CreateTaskModal } from "../src/client/tasks/CreateTaskModal.tsx";
 import { TaskListPanel } from "../src/client/tasks/TaskList.tsx";
@@ -34,7 +32,6 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
 
-  const queryClientRef = useQueryClient();
   const { data: projects = [] } = useQuery(projectQueries.list());
   const { data: activeTasks = [] } = useQuery(taskQueries.active());
   const { data: backlogTasks = [] } = useQuery(taskQueries.backlog());
@@ -43,41 +40,6 @@ function App() {
     ...taskQueries.detail(selectedTaskId!),
     enabled: !!selectedTaskId,
   });
-
-  // Session state (temporary — will move to child components in Phase 1-2)
-  const [latestSession, setLatestSession] = useState<Session | null>(null);
-
-  const refreshSession = useCallback(async () => {
-    if (!selectedTaskId) return;
-    const sessions = await listSessionsByTask(selectedTaskId);
-    setLatestSession(sessions[0] ?? null);
-  }, [selectedTaskId]);
-
-  useEffect(() => {
-    if (!selectedTaskId) {
-      setLatestSession(null);
-      return;
-    }
-    refreshSession();
-  }, [selectedTaskId, refreshSession]);
-
-  // Poll session every 2s when there's an active session
-  useEffect(() => {
-    if (
-      !latestSession ||
-      (latestSession.status !== "pending" &&
-        latestSession.status !== "provisioning" &&
-        latestSession.status !== "running")
-    ) {
-      return;
-    }
-    const interval = setInterval(refreshSession, 2000);
-    return () => clearInterval(interval);
-  }, [latestSession, refreshSession]);
-
-  function handleTaskUpdated() {
-    queryClientRef.invalidateQueries({ queryKey: taskQueries.all() });
-  }
 
   function handleSelectTask(id: string) {
     setSelectedTaskId(id);
@@ -147,12 +109,7 @@ function App() {
         {/* Middle: Task info panel */}
         <section className="w-80 flex-shrink-0 border-r bg-white hidden md:block">
           {selectedTask ? (
-            <TaskInfoPanel
-              task={selectedTask}
-              latestSession={latestSession}
-              onUpdated={handleTaskUpdated}
-              onSessionStarted={refreshSession}
-            />
+            <TaskInfoPanel task={selectedTask} />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-400 text-sm">
               タスクを選択してください
@@ -163,12 +120,7 @@ function App() {
         {/* Right: Session chat panel */}
         <main className="flex-1 bg-gray-50 min-w-0">
           {selectedTask ? (
-            <SessionChatPanel
-              session={latestSession}
-              taskId={selectedTask.id}
-              taskStatus={selectedTask.status}
-              onSessionStarted={refreshSession}
-            />
+            <SessionChatPanel task={selectedTask} />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-400 text-sm">
               セッション

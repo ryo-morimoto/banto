@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
-import type { Session } from "../../shared/types.ts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Task } from "../../shared/types.ts";
 import { startSession } from "./api.ts";
+import { sessionQueries } from "./queries.ts";
 import { ChatMessage } from "./ChatMessage.tsx";
 
 interface LogEntry {
@@ -13,19 +15,12 @@ function isActiveSession(status: string) {
   return status === "pending" || status === "provisioning" || status === "running";
 }
 
-export function SessionChatPanel({
-  session,
-  taskId,
-  taskStatus,
-  onSessionStarted,
-}: {
-  session: Session | null;
-  taskId: string;
-  taskStatus: string;
-  onSessionStarted: () => void;
-}) {
+export function SessionChatPanel({ task }: { task: Task }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+  const sessionsQuery = useQuery(sessionQueries.byTask(task.id));
+  const session = sessionsQuery.data?.[0] ?? null;
   const activeSessionId = session && isActiveSession(session.status) ? session.id : null;
 
   // SSE connection for active sessions
@@ -62,8 +57,8 @@ export function SessionChatPanel({
   }, [session?.id]);
 
   async function handleStartSession() {
-    await startSession(taskId);
-    onSessionStarted();
+    await startSession(task.id);
+    queryClient.invalidateQueries({ queryKey: sessionQueries.byTask(task.id).queryKey });
   }
 
   // No session state
@@ -71,7 +66,7 @@ export function SessionChatPanel({
     return (
       <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-3">
         <div className="text-sm">セッションなし</div>
-        {taskStatus === "active" && (
+        {task.status === "active" && (
           <button
             type="button"
             onClick={handleStartSession}
@@ -135,7 +130,7 @@ export function SessionChatPanel({
           {"error" in session && session.error && (
             <div className="text-xs text-red-500 mb-2">{session.error}</div>
           )}
-          {taskStatus === "active" && (
+          {task.status === "active" && (
             <button
               type="button"
               onClick={handleStartSession}
