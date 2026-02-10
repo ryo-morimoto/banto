@@ -86,21 +86,7 @@
               };
             };
 
-            systemd.services.banto-tailscale-serve = {
-              description = "Tailscale Serve for banto";
-              after = [
-                "tailscaled.service"
-                "banto.service"
-              ];
-              wantedBy = [ "multi-user.target" ];
 
-              serviceConfig = {
-                Type = "oneshot";
-                RemainAfterExit = true;
-                ExecStart = "${pkgs.tailscale}/bin/tailscale serve --bg --set-path / --https=443 http://127.0.0.1:${toString cfg.port}";
-                ExecStop = "${pkgs.tailscale}/bin/tailscale serve --https=443 off";
-              };
-            };
           };
         };
     };
