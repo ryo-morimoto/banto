@@ -42,7 +42,7 @@ function SessionRow({ session }: { session: Session }) {
             <span className="text-xs text-red-500">{session.error}</span>
           )}
         </div>
-        <div className="text-xs text-gray-400">{session.createdAt}</div>
+        <div className="text-xs text-gray-400">{new Date(session.createdAt).toLocaleString()}</div>
       </div>
       {isActiveSession(session.status) && (
         <div className="mt-2">
