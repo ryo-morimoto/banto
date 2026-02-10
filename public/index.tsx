@@ -9,6 +9,21 @@ import { CreateTask } from "../src/client/tasks/CreateTask.tsx";
 import { TaskListPanel } from "../src/client/tasks/TaskList.tsx";
 import { TaskDetail } from "../src/client/tasks/TaskDetail.tsx";
 import { requestNotificationPermission } from "../src/client/notifications.ts";
+import { ErrorBoundary, reportErrorToServer } from "../src/client/ErrorBoundary.tsx";
+import { ApiError } from "../src/client/api.ts";
+
+window.addEventListener("unhandledrejection", (event) => {
+  const err = event.reason;
+  reportErrorToServer(
+    err?.message ?? String(err),
+    err?.stack,
+    err instanceof ApiError ? err.requestId ?? undefined : undefined,
+  );
+});
+
+window.addEventListener("error", (event) => {
+  reportErrorToServer(event.message, event.error?.stack);
+});
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -97,6 +112,8 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );

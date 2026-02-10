@@ -1,16 +1,13 @@
-import { api } from "../api.ts";
+import { api, unwrap } from "../api.ts";
 
 export async function listSessionsByTask(taskId: string) {
-  const { data } = await api.api.sessions.task({ taskId }).get();
-  return data!;
+  return unwrap(await api.api.sessions.task({ taskId }).get());
 }
 
 export async function getSession(id: string) {
-  const { data } = await api.api.sessions({ id }).get();
-  return data!;
+  return unwrap(await api.api.sessions({ id }).get());
 }
 
 export async function startSession(taskId: string) {
-  const { data } = await api.api.sessions.post({ taskId });
-  return data!;
+  return unwrap(await api.api.sessions.post({ taskId }));
 }

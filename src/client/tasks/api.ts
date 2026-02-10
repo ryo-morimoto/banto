@@ -1,23 +1,19 @@
-import { api } from "../api.ts";
+import { api, unwrap } from "../api.ts";
 
 export async function listActiveTasks() {
-  const { data } = await api.api.tasks.active.get();
-  return data!;
+  return unwrap(await api.api.tasks.active.get());
 }
 
 export async function listBacklogTasks() {
-  const { data } = await api.api.tasks.backlog.get();
-  return data!;
+  return unwrap(await api.api.tasks.backlog.get());
 }
 
 export async function listPinnedTasks() {
-  const { data } = await api.api.tasks.pinned.get();
-  return data!;
+  return unwrap(await api.api.tasks.pinned.get());
 }
 
 export async function getTask(id: string) {
-  const { data } = await api.api.tasks({ id }).get();
-  return data!;
+  return unwrap(await api.api.tasks({ id }).get());
 }
 
 export async function createTask(input: {
@@ -25,42 +21,36 @@ export async function createTask(input: {
   title: string;
   description?: string;
 }) {
-  const { data } = await api.api.tasks.post(input);
-  return data!;
+  return unwrap(await api.api.tasks.post(input));
 }
 
 export async function activateTask(id: string) {
-  const { data } = await api.api.tasks({ id }).activate.post();
-  return data!;
+  return unwrap(await api.api.tasks({ id }).activate.post());
 }
 
 export async function completeTask(id: string) {
-  const { data } = await api.api.tasks({ id }).complete.post();
-  return data!;
+  return unwrap(await api.api.tasks({ id }).complete.post());
 }
 
 export async function reopenTask(id: string) {
-  const { data } = await api.api.tasks({ id }).reopen.post();
-  return data!;
+  return unwrap(await api.api.tasks({ id }).reopen.post());
 }
 
 export async function pinTask(id: string) {
-  const { data } = await api.api.tasks({ id }).pin.post();
-  return data!;
+  return unwrap(await api.api.tasks({ id }).pin.post());
 }
 
 export async function unpinTask(id: string) {
-  const { data } = await api.api.tasks({ id }).unpin.post();
-  return data!;
+  return unwrap(await api.api.tasks({ id }).unpin.post());
 }
 
 export async function updateTaskDescription(id: string, description: string) {
-  const { data } = await api.api.tasks({ id }).description.patch({ description });
-  return data!;
+  return unwrap(await api.api.tasks({ id }).description.patch({ description }));
 }
 
 export async function listAttachments(taskId: string) {
   const res = await fetch(`/api/attachments/task/${taskId}`);
+  if (!res.ok) throw new Error(`Failed to list attachments: ${res.status}`);
   return res.json();
 }
 
@@ -71,9 +61,11 @@ export async function uploadAttachment(taskId: string, file: File) {
     method: "POST",
     body: form,
   });
+  if (!res.ok) throw new Error(`Failed to upload attachment: ${res.status}`);
   return res.json();
 }
 
 export async function deleteAttachment(id: string) {
-  await fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  const res = await fetch(`/api/attachments/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`Failed to delete attachment: ${res.status}`);
 }

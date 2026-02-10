@@ -1,13 +1,11 @@
-import { api } from "../api.ts";
+import { api, unwrap } from "../api.ts";
 
 export async function listProjects() {
-  const { data } = await api.api.projects.get();
-  return data!;
+  return unwrap(await api.api.projects.get());
 }
 
 export async function createProject(input: { name: string; localPath: string; repoUrl?: string }) {
-  const { data } = await api.api.projects.post(input);
-  return data!;
+  return unwrap(await api.api.projects.post(input));
 }
 
 export async function deleteProject(id: string) {

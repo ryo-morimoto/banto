@@ -5,6 +5,7 @@ import type { TaskRepository } from "../tasks/repository.ts";
 import type { ProjectRepository } from "../projects/repository.ts";
 import type { AttachmentService } from "../attachments/service.ts";
 import { runAgent } from "./agent.ts";
+import { logger } from "../logger.ts";
 
 function copyAttachmentsToProject(
   attachmentService: AttachmentService,
@@ -66,8 +67,12 @@ export function createRunner(
         onSessionId: (ccSessionId) => {
           try {
             sessionService.markRunning(sessionId, ccSessionId, branch);
-          } catch {
-            // Session may already be in a different state
+          } catch (err) {
+            logger.warn("Session state transition failed", {
+              sessionId,
+              transition: "running",
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         },
       })
@@ -78,15 +83,22 @@ export function createRunner(
             } else {
               sessionService.markFailed(sessionId, result.error ?? "Unknown error");
             }
-          } catch {
-            // Session may already be in a terminal state
+          } catch (err) {
+            logger.warn("Session state transition failed", {
+              sessionId,
+              transition: result.success ? "done" : "failed",
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
         })
         .catch((err) => {
           try {
             sessionService.markFailed(sessionId, err instanceof Error ? err.message : String(err));
-          } catch {
-            // ignore
+          } catch (innerErr) {
+            logger.error("Failed to mark session as failed", {
+              sessionId,
+              error: innerErr instanceof Error ? innerErr.message : String(innerErr),
+            });
           }
         });
     },
@@ -99,7 +111,12 @@ export function createMockRunner(sessionService: SessionService) {
       setTimeout(() => {
         try {
           sessionService.markProvisioning(sessionId, `banto-${sessionId.slice(0, 8)}`);
-        } catch {
+        } catch (err) {
+          logger.warn("Mock: session state transition failed", {
+            sessionId,
+            transition: "provisioning",
+            error: err instanceof Error ? err.message : String(err),
+          });
           return;
         }
 
@@ -110,7 +127,12 @@ export function createMockRunner(sessionService: SessionService) {
               `cc-${sessionId.slice(0, 8)}`,
               `task/${sessionId.slice(0, 8)}`,
             );
-          } catch {
+          } catch (err) {
+            logger.warn("Mock: session state transition failed", {
+              sessionId,
+              transition: "running",
+              error: err instanceof Error ? err.message : String(err),
+            });
             return;
           }
 
@@ -121,7 +143,12 @@ export function createMockRunner(sessionService: SessionService) {
               } else {
                 sessionService.markFailed(sessionId, "Mock: simulated failure");
               }
-            } catch {
+            } catch (err) {
+              logger.warn("Mock: session state transition failed", {
+                sessionId,
+                transition: "done/failed",
+                error: err instanceof Error ? err.message : String(err),
+              });
               return;
             }
           }, 3000);
