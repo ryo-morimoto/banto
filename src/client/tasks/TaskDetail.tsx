@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { Task, Session, Attachment } from "@/shared/types.ts";
-import { sendNotification } from "@/client/notifications.ts";
+import type { Task, Session, Attachment } from "../../shared/types.ts";
+import { sendNotification } from "../notifications.ts";
 import {
   activateTask,
   completeTask,
@@ -12,8 +12,8 @@ import {
   uploadAttachment,
   deleteAttachment,
 } from "./api.ts";
-import { listSessionsByTask, startSession } from "@/client/sessions/api.ts";
-import { SessionLog } from "@/client/sessions/SessionLog.tsx";
+import { listSessionsByTask, startSession } from "../sessions/api.ts";
+import { SessionLog } from "../sessions/SessionLog.tsx";
 
 function isActiveSession(status: string) {
   return status === "pending" || status === "provisioning" || status === "running";

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Project } from "@/shared/types.ts";
+import type { Project } from "../../shared/types.ts";
 import { deleteProject } from "./api.ts";
 import { CreateProject } from "./CreateProject.tsx";
 

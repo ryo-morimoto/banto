@@ -1,4 +1,4 @@
-import type { Task, Project } from "@/shared/types.ts";
+import type { Task, Project } from "../../shared/types.ts";
 
 function TaskItem({
   task,

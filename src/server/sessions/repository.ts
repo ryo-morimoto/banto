@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Session } from "@/shared/types.ts";
+import type { Session } from "../../shared/types.ts";
 
 interface SessionRow {
   id: string;

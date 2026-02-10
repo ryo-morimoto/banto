@@ -1,5 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { Task, Project } from "@/shared/types.ts";
+import type { Task, Project } from "../../shared/types.ts";
 import { logStore } from "./log-store.ts";
 
 export interface AgentResult {

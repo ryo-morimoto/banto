@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Project } from "@/shared/types.ts";
+import type { Project } from "../../shared/types.ts";
 
 interface ProjectRow {
   id: string;

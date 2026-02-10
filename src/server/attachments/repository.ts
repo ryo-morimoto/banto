@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Attachment } from "@/shared/types.ts";
+import type { Attachment } from "../../shared/types.ts";
 
 interface AttachmentRow {
   id: string;

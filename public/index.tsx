@@ -1,14 +1,14 @@
 import "./global.css";
 import { StrictMode, useState, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
-import type { Project, Task } from "@/shared/types.ts";
-import { listProjects } from "@/client/projects/api.ts";
-import { listActiveTasks, listBacklogTasks, listPinnedTasks, getTask } from "@/client/tasks/api.ts";
-import { ProjectManager } from "@/client/projects/ProjectManager.tsx";
-import { CreateTask } from "@/client/tasks/CreateTask.tsx";
-import { TaskListPanel } from "@/client/tasks/TaskList.tsx";
-import { TaskDetail } from "@/client/tasks/TaskDetail.tsx";
-import { requestNotificationPermission } from "@/client/notifications.ts";
+import type { Project, Task } from "../src/shared/types.ts";
+import { listProjects } from "../src/client/projects/api.ts";
+import { listActiveTasks, listBacklogTasks, listPinnedTasks, getTask } from "../src/client/tasks/api.ts";
+import { ProjectManager } from "../src/client/projects/ProjectManager.tsx";
+import { CreateTask } from "../src/client/tasks/CreateTask.tsx";
+import { TaskListPanel } from "../src/client/tasks/TaskList.tsx";
+import { TaskDetail } from "../src/client/tasks/TaskDetail.tsx";
+import { requestNotificationPermission } from "../src/client/notifications.ts";
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);

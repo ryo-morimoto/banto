@@ -1,4 +1,4 @@
-import { api } from "@/client/api.ts";
+import { api } from "../api.ts";
 
 export async function listActiveTasks() {
   const { data } = await api.api.tasks.active.get();

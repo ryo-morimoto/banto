@@ -73,12 +73,13 @@
                   ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w ${bantoPackage}/share/banto/ /var/lib/banto/app/
                   cd /var/lib/banto/app
                   ${pkgs.bun}/bin/bun install --frozen-lockfile
+                  ${pkgs.bun}/bin/bun build --compile --minify-whitespace --minify-syntax --target bun --outfile server src/server.ts
                 '';
 
                 ExecStart = pkgs.writeShellScript "banto-start" ''
                   cd /var/lib/banto/app
                   export NODE_ENV=production
-                  exec ${pkgs.bun}/bin/bun run src/server.ts
+                  exec /var/lib/banto/app/server
                 '';
 
                 Restart = "on-failure";

@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Task } from "@/shared/types.ts";
+import type { Task } from "../../shared/types.ts";
 
 interface TaskRow {
   id: string;

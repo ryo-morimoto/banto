@@ -1,4 +1,4 @@
-import { api } from "@/client/api.ts";
+import { api } from "../api.ts";
 
 export async function listSessionsByTask(taskId: string) {
   const { data } = await api.api.sessions.task({ taskId }).get();
