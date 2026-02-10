@@ -41,7 +41,7 @@ export function SessionLog({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="max-h-64 overflow-y-auto bg-gray-900 rounded p-2 font-mono text-xs">
+    <div className="max-h-48 md:max-h-64 overflow-y-auto bg-gray-900 rounded p-2 font-mono text-xs">
       {logs.map((entry, i) => (
         <div key={i} className={`py-0.5 ${typeColor[entry.type]}`}>
           <span className="text-gray-500 mr-2">

@@ -30,16 +30,16 @@ function SessionRow({ session }: { session: Session }) {
 
   return (
     <div className="py-2 border-b">
-      <div className="flex items-center justify-between text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-1 text-sm">
         <div className="flex items-center gap-2">
           <span className={`font-mono text-xs ${statusColor[session.status]}`}>
             {session.status}
           </span>
           {"branch" in session && session.branch && (
-            <span className="text-xs text-gray-400">{session.branch}</span>
+            <span className="text-xs text-gray-400 break-all">{session.branch}</span>
           )}
           {"error" in session && session.error && (
-            <span className="text-xs text-red-500">{session.error}</span>
+            <span className="text-xs text-red-500 break-all">{session.error}</span>
           )}
         </div>
         <div className="text-xs text-gray-400">{new Date(session.createdAt).toLocaleString()}</div>
@@ -210,10 +210,10 @@ export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => v
   );
 
   return (
-    <div className="p-4 h-full overflow-y-auto">
+    <div className="p-3 md:p-4 h-full overflow-y-auto">
       <div className="flex items-start justify-between mb-4">
-        <div>
-          <h2 className="text-lg font-bold">{task.title}</h2>
+        <div className="min-w-0">
+          <h2 className="text-base md:text-lg font-bold break-words">{task.title}</h2>
           <div className="text-xs text-gray-400 mt-1">
             <span className="font-mono">{task.status}</span>
             {task.pinned && <span className="ml-2 text-yellow-500">pinned</span>}
@@ -262,7 +262,7 @@ export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => v
           <button
             type="button"
             onClick={() => handleAction(() => activateTask(task.id))}
-            className="text-xs bg-blue-600 text-white px-3 py-1 rounded"
+            className="text-xs bg-blue-600 text-white px-3 py-1.5 md:py-1 rounded"
           >
             Activate
           </button>
@@ -272,7 +272,7 @@ export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => v
             <button
               type="button"
               onClick={() => handleAction(() => completeTask(task.id))}
-              className="text-xs bg-green-600 text-white px-3 py-1 rounded"
+              className="text-xs bg-green-600 text-white px-3 py-1.5 md:py-1 rounded"
             >
               Complete
             </button>
@@ -280,7 +280,7 @@ export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => v
               <button
                 type="button"
                 onClick={handleStartSession}
-                className="text-xs bg-purple-600 text-white px-3 py-1 rounded"
+                className="text-xs bg-purple-600 text-white px-3 py-1.5 md:py-1 rounded"
               >
                 Start Session
               </button>
@@ -291,7 +291,7 @@ export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => v
           <button
             type="button"
             onClick={() => handleAction(() => reopenTask(task.id))}
-            className="text-xs bg-orange-600 text-white px-3 py-1 rounded"
+            className="text-xs bg-orange-600 text-white px-3 py-1.5 md:py-1 rounded"
           >
             Reopen
           </button>
@@ -300,7 +300,7 @@ export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => v
           <button
             type="button"
             onClick={() => handleAction(() => unpinTask(task.id))}
-            className="text-xs border px-3 py-1 rounded"
+            className="text-xs border px-3 py-1.5 md:py-1 rounded"
           >
             Unpin
           </button>
@@ -308,7 +308,7 @@ export function TaskDetail({ task, onUpdated }: { task: Task; onUpdated: () => v
           <button
             type="button"
             onClick={() => handleAction(() => pinTask(task.id))}
-            className="text-xs border px-3 py-1 rounded"
+            className="text-xs border px-3 py-1.5 md:py-1 rounded"
           >
             Pin
           </button>
