@@ -6,7 +6,7 @@ import { listProjects } from "../src/client/projects/api.ts";
 import { listActiveTasks, listBacklogTasks, listPinnedTasks, getTask } from "../src/client/tasks/api.ts";
 import { listSessionsByTask } from "../src/client/sessions/api.ts";
 import { ProjectManager } from "../src/client/projects/ProjectManager.tsx";
-import { CreateTask } from "../src/client/tasks/CreateTask.tsx";
+import { CreateTaskModal } from "../src/client/tasks/CreateTaskModal.tsx";
 import { TaskListPanel } from "../src/client/tasks/TaskList.tsx";
 import { TaskInfoPanel } from "../src/client/tasks/TaskInfoPanel.tsx";
 import { SessionChatPanel } from "../src/client/sessions/SessionChatPanel.tsx";
@@ -37,6 +37,7 @@ function App() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [latestSession, setLatestSession] = useState<Session | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [createTaskOpen, setCreateTaskOpen] = useState(false);
 
   const refreshProjects = useCallback(async () => {
     setProjects(await listProjects());
@@ -141,7 +142,13 @@ function App() {
           <h1 className="text-sm font-bold">banto</h1>
         </div>
         <div className="flex gap-2 md:gap-3">
-          <CreateTask projects={projects} onCreated={refreshTasks} />
+          <button
+            type="button"
+            onClick={() => setCreateTaskOpen(true)}
+            className="text-xs text-blue-600 hover:underline"
+          >
+            + タスク追加
+          </button>
           <ProjectManager projects={projects} onChanged={refreshAll} />
         </div>
       </header>
@@ -205,6 +212,13 @@ function App() {
           )}
         </main>
       </div>
+
+      <CreateTaskModal
+        projects={projects}
+        open={createTaskOpen}
+        onClose={() => setCreateTaskOpen(false)}
+        onCreated={refreshTasks}
+      />
     </div>
   );
 }
