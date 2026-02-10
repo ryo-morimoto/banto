@@ -5,6 +5,8 @@ import type { TaskRepository } from "../tasks/repository.ts";
 import type { ProjectRepository } from "../projects/repository.ts";
 import type { AttachmentService } from "../attachments/service.ts";
 import { runAgent } from "./agent.ts";
+import { generateSlug } from "./slugify.ts";
+import { getWorktreePath, createWorktree, removeWorktree } from "./worktree.ts";
 import { logger } from "../logger.ts";
 
 function copyAttachmentsToProject(
@@ -36,7 +38,7 @@ export function createRunner(
   attachmentService?: AttachmentService,
 ) {
   return {
-    run(sessionId: string) {
+    async run(sessionId: string) {
       const session = sessionService.findById(sessionId);
       if (!session || session.status !== "pending") return;
 
@@ -49,13 +51,18 @@ export function createRunner(
       const branch = `banto/${sessionId.slice(0, 8)}`;
       const containerName = `banto-${sessionId.slice(0, 8)}`;
 
-      // Copy attachments into project working directory
+      // Create isolated worktree
+      const slug = await generateSlug(task.title);
+      const wtPath = getWorktreePath(project.localPath, slug, sessionId);
+      createWorktree(project.localPath, branch, wtPath);
+
+      // Copy attachments into worktree
       const attachmentPaths = attachmentService
-        ? copyAttachmentsToProject(attachmentService, task.id, project.localPath)
+        ? copyAttachmentsToProject(attachmentService, task.id, wtPath)
         : [];
 
       // Transition to provisioning
-      sessionService.markProvisioning(sessionId, containerName);
+      sessionService.markProvisioning(sessionId, containerName, wtPath);
 
       // Run agent asynchronously
       runAgent({
@@ -64,6 +71,7 @@ export function createRunner(
         project,
         branch,
         attachmentPaths,
+        cwd: wtPath,
         onSessionId: (ccSessionId) => {
           try {
             sessionService.markRunning(sessionId, ccSessionId, branch);
@@ -100,6 +108,17 @@ export function createRunner(
               error: innerErr instanceof Error ? innerErr.message : String(innerErr),
             });
           }
+        })
+        .finally(() => {
+          try {
+            removeWorktree(project.localPath, wtPath);
+          } catch (err) {
+            logger.warn("Failed to clean up worktree", {
+              sessionId,
+              worktreePath: wtPath,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         });
     },
   };
@@ -110,7 +129,11 @@ export function createMockRunner(sessionService: SessionService) {
     run(sessionId: string) {
       setTimeout(() => {
         try {
-          sessionService.markProvisioning(sessionId, `banto-${sessionId.slice(0, 8)}`);
+          sessionService.markProvisioning(
+            sessionId,
+            `banto-${sessionId.slice(0, 8)}`,
+            "/mock/worktree",
+          );
         } catch (err) {
           logger.warn("Mock: session state transition failed", {
             sessionId,

@@ -5,6 +5,8 @@ import { createProjectRepository } from "../projects/repository.ts";
 import { createSessionRepository } from "./repository.ts";
 import { createSessionService } from "./service.ts";
 import { createRunner, createMockRunner } from "./runner.ts";
+import { recoverStaleSessions } from "./recovery.ts";
+import { removeWorktree } from "./worktree.ts";
 import { logStore } from "./log-store.ts";
 import { attachmentService } from "../attachments/routes.ts";
 
@@ -12,6 +14,8 @@ const taskRepo = createTaskRepository(db);
 const projectRepo = createProjectRepository(db);
 const sessionRepo = createSessionRepository(db);
 const service = createSessionService(sessionRepo, taskRepo);
+
+recoverStaleSessions(sessionRepo, taskRepo, projectRepo, removeWorktree);
 
 const runner =
   process.env["BANTO_MOCK_RUNNER"] === "1"
@@ -40,10 +44,12 @@ export const sessionRoutes = new Elysia({ prefix: "/sessions" })
   )
   .post(
     "/:id/provisioning",
-    ({ params, body }) => service.markProvisioning(params.id, body.containerName),
+    ({ params, body }) =>
+      service.markProvisioning(params.id, body.containerName, body.worktreePath),
     {
       body: t.Object({
         containerName: t.String(),
+        worktreePath: t.String(),
       }),
     },
   )

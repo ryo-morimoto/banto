@@ -36,6 +36,7 @@ export type Session =
       taskId: string;
       status: "provisioning";
       containerName: string;
+      worktreePath: string;
       createdAt: string;
     }
   | {
@@ -43,6 +44,7 @@ export type Session =
       taskId: string;
       status: "running";
       containerName: string;
+      worktreePath: string;
       ccSessionId: string;
       branch: string;
       createdAt: string;
@@ -52,6 +54,7 @@ export type Session =
       taskId: string;
       status: "done";
       containerName: string;
+      worktreePath: string;
       ccSessionId: string;
       branch: string;
       createdAt: string;
@@ -62,6 +65,7 @@ export type Session =
       taskId: string;
       status: "failed";
       containerName: string;
+      worktreePath: string | null;
       error: string;
       createdAt: string;
       completedAt: string;

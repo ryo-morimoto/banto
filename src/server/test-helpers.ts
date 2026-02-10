@@ -36,6 +36,7 @@ export function createTestDb(): Database {
       container_name  TEXT,
       cc_session_id   TEXT,
       branch          TEXT,
+      worktree_path   TEXT,
       error           TEXT,
       created_at      TEXT NOT NULL DEFAULT (datetime('now')),
       completed_at    TEXT

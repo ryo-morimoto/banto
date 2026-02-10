@@ -51,7 +51,7 @@ describe("SessionService", () => {
       taskService.activate(task.id);
       const session = service.start(task.id);
 
-      const updated = service.markProvisioning(session.id, "banto-abc123");
+      const updated = service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
 
       expect(updated.status).toBe("provisioning");
       if (updated.status === "provisioning") {
@@ -63,9 +63,9 @@ describe("SessionService", () => {
       const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
       taskService.activate(task.id);
       const session = service.start(task.id);
-      service.markProvisioning(session.id, "banto-abc123");
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
 
-      expect(() => service.markProvisioning(session.id, "banto-xyz")).toThrow();
+      expect(() => service.markProvisioning(session.id, "banto-xyz", "/tmp/wt2")).toThrow();
     });
   });
 
@@ -74,7 +74,7 @@ describe("SessionService", () => {
       const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
       taskService.activate(task.id);
       const session = service.start(task.id);
-      service.markProvisioning(session.id, "banto-abc123");
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
 
       const updated = service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
 
@@ -99,7 +99,7 @@ describe("SessionService", () => {
       const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
       taskService.activate(task.id);
       const session = service.start(task.id);
-      service.markProvisioning(session.id, "banto-abc123");
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
       service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
 
       const updated = service.markDone(session.id);
@@ -138,7 +138,7 @@ describe("SessionService", () => {
       const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
       taskService.activate(task.id);
       const session = service.start(task.id);
-      service.markProvisioning(session.id, "banto-abc123");
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
       service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
       service.markDone(session.id);
 

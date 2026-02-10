@@ -61,4 +61,8 @@ db.run(`
   )
 `);
 
+try {
+  db.run("ALTER TABLE sessions ADD COLUMN worktree_path TEXT");
+} catch {}
+
 export { db };

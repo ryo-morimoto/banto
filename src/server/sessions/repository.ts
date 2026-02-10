@@ -8,6 +8,7 @@ interface SessionRow {
   container_name: string | null;
   cc_session_id: string | null;
   branch: string | null;
+  worktree_path: string | null;
   error: string | null;
   created_at: string;
   completed_at: string | null;
@@ -20,12 +21,18 @@ function toSession(row: SessionRow): Session {
     case "pending":
       return { ...base, status: "pending" };
     case "provisioning":
-      return { ...base, status: "provisioning", containerName: row.container_name! };
+      return {
+        ...base,
+        status: "provisioning",
+        containerName: row.container_name!,
+        worktreePath: row.worktree_path!,
+      };
     case "running":
       return {
         ...base,
         status: "running",
         containerName: row.container_name!,
+        worktreePath: row.worktree_path!,
         ccSessionId: row.cc_session_id!,
         branch: row.branch!,
       };
@@ -34,6 +41,7 @@ function toSession(row: SessionRow): Session {
         ...base,
         status: "done",
         containerName: row.container_name!,
+        worktreePath: row.worktree_path!,
         ccSessionId: row.cc_session_id!,
         branch: row.branch!,
         completedAt: row.completed_at!,
@@ -43,6 +51,7 @@ function toSession(row: SessionRow): Session {
         ...base,
         status: "failed",
         containerName: row.container_name!,
+        worktreePath: row.worktree_path ?? null,
         error: row.error!,
         completedAt: row.completed_at!,
       };
@@ -72,6 +81,13 @@ export function createSessionRepository(db: Database) {
         )
         .get(taskId) as SessionRow | null;
       return row ? toSession(row) : null;
+    },
+
+    findActive(): Session[] {
+      const rows = db
+        .query("SELECT * FROM sessions WHERE status IN ('pending', 'provisioning', 'running')")
+        .all() as SessionRow[];
+      return rows.map(toSession);
     },
 
     insert(session: { id: string; taskId: string }): void {

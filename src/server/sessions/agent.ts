@@ -40,6 +40,7 @@ export async function runAgent(opts: {
   attachmentPaths?: string[];
   onSessionId: (id: string) => void;
   signal?: AbortSignal;
+  cwd?: string;
 }): Promise<AgentResult> {
   const parts = [opts.task.title, opts.task.description].filter(Boolean);
   if (opts.attachmentPaths && opts.attachmentPaths.length > 0) {
@@ -60,9 +61,9 @@ export async function runAgent(opts: {
   pushLog(opts.bantoSessionId, "status", "Agent starting...");
 
   const response = query({
-    prompt: `You are working on a task. Create a git branch named "${opts.branch}" and work on it.\n\n${prompt}`,
+    prompt,
     options: {
-      cwd: opts.project.localPath,
+      cwd: opts.cwd ?? opts.project.localPath,
       allowedTools: ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
@@ -72,7 +73,7 @@ export async function runAgent(opts: {
       systemPrompt: {
         type: "preset",
         preset: "claude_code",
-        append: `You are an autonomous coding agent. Complete the task thoroughly. Work on branch "${opts.branch}".`,
+        append: `You are an autonomous coding agent. Complete the task thoroughly. You are already on branch "${opts.branch}".`,
       },
     },
   });

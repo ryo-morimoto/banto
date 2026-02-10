@@ -17,12 +17,15 @@ export function createSessionService(sessionRepo: SessionRepository, taskRepo: T
       return sessionRepo.findById(id)!;
     },
 
-    markProvisioning(id: string, containerName: string) {
+    markProvisioning(id: string, containerName: string, worktreePath: string) {
       const session = sessionRepo.findById(id);
       if (!session) throw new Error("Session not found");
       if (session.status !== "pending")
         throw new Error(`Cannot provision session in ${session.status} status`);
-      sessionRepo.updateStatus(id, "provisioning", { container_name: containerName });
+      sessionRepo.updateStatus(id, "provisioning", {
+        container_name: containerName,
+        worktree_path: worktreePath,
+      });
       return sessionRepo.findById(id)!;
     },
 
