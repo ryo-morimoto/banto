@@ -3,10 +3,12 @@ import type { Task, Project } from "../../shared/types.ts";
 function TaskItem({
   task,
   selected,
+  running,
   onSelect,
 }: {
   task: Task;
   selected: boolean;
+  running: boolean;
   onSelect: (id: string) => void;
 }) {
   return (
@@ -19,6 +21,9 @@ function TaskItem({
     >
       <div className="flex items-center gap-2">
         {task.pinned && <span className="text-yellow-500 text-xs">pin</span>}
+        {running && (
+          <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse flex-shrink-0" />
+        )}
         <span className="truncate">{task.title}</span>
         <span className="ml-auto text-xs text-gray-400">{task.status}</span>
       </div>
@@ -42,6 +47,7 @@ export function TaskListPanel({
   pinnedTasks,
   projects,
   selectedTaskId,
+  runningTaskIds,
   onSelectTask,
 }: {
   activeTasks: Task[];
@@ -49,6 +55,7 @@ export function TaskListPanel({
   pinnedTasks: Task[];
   projects: Project[];
   selectedTaskId: string | null;
+  runningTaskIds: Set<string>;
   onSelectTask: (id: string) => void;
 }) {
   const projectMap = new Map(projects.map((p) => [p.id, p]));
@@ -75,6 +82,7 @@ export function TaskListPanel({
             key={task.id}
             task={task}
             selected={task.id === selectedTaskId}
+            running={runningTaskIds.has(task.id)}
             onSelect={onSelectTask}
           />
         ))}
@@ -94,6 +102,7 @@ export function TaskListPanel({
               key={task.id}
               task={task}
               selected={task.id === selectedTaskId}
+              running={runningTaskIds.has(task.id)}
               onSelect={onSelectTask}
             />
           ))}

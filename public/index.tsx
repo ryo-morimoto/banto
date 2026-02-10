@@ -3,7 +3,12 @@ import { StrictMode, useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import type { Project, Task, Session } from "../src/shared/types.ts";
 import { listProjects } from "../src/client/projects/api.ts";
-import { listActiveTasks, listBacklogTasks, listPinnedTasks, getTask } from "../src/client/tasks/api.ts";
+import {
+  listActiveTasks,
+  listBacklogTasks,
+  listPinnedTasks,
+  getTask,
+} from "../src/client/tasks/api.ts";
 import { listSessionsByTask } from "../src/client/sessions/api.ts";
 import { ProjectManager } from "../src/client/projects/ProjectManager.tsx";
 import { CreateTaskModal } from "../src/client/tasks/CreateTaskModal.tsx";
@@ -20,7 +25,7 @@ window.addEventListener("unhandledrejection", (event) => {
   reportErrorToServer(
     err?.message ?? String(err),
     err?.stack,
-    err instanceof ApiError ? err.requestId ?? undefined : undefined,
+    err instanceof ApiError ? (err.requestId ?? undefined) : undefined,
   );
 });
 
@@ -36,6 +41,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [latestSession, setLatestSession] = useState<Session | null>(null);
+  const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
 
@@ -52,6 +58,24 @@ function App() {
     setActiveTasks(active);
     setBacklogTasks(backlog);
     setPinnedTasks(pinned);
+
+    // Check which active tasks have running sessions
+    const sessionChecks = await Promise.all(
+      active.map(async (t) => {
+        const sessions = await listSessionsByTask(t.id);
+        const latest = sessions[0];
+        if (
+          latest &&
+          (latest.status === "pending" ||
+            latest.status === "provisioning" ||
+            latest.status === "running")
+        ) {
+          return t.id;
+        }
+        return null;
+      }),
+    );
+    setRunningTaskIds(new Set(sessionChecks.filter((id): id is string => id !== null)));
   }, []);
 
   const refreshAll = useCallback(async () => {
@@ -136,7 +160,12 @@ function App() {
             aria-label="メニュー"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
             </svg>
           </button>
           <h1 className="text-sm font-bold">banto</h1>
@@ -175,6 +204,7 @@ function App() {
               pinnedTasks={pinnedTasks}
               projects={projects}
               selectedTaskId={selectedTaskId}
+              runningTaskIds={runningTaskIds}
               onSelectTask={handleSelectTask}
             />
           </div>
