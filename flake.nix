@@ -69,7 +69,7 @@
 
                 ExecStartPre = pkgs.writeShellScript "banto-prepare" ''
                   mkdir -p /var/lib/banto/app
-                  ${pkgs.rsync}/bin/rsync -a --delete ${bantoPackage}/share/banto/ /var/lib/banto/app/
+                  ${pkgs.rsync}/bin/rsync -a --delete --chmod=u+w ${bantoPackage}/share/banto/ /var/lib/banto/app/
                   cd /var/lib/banto/app
                   ${pkgs.bun}/bin/bun install --frozen-lockfile
                 '';
