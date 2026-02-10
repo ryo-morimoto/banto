@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { createTask } from "./api.ts";
 import { requestNotificationPermission } from "../notifications.ts";
 import { projectQueries } from "../projects/queries.ts";
@@ -11,6 +12,7 @@ export function CreateTaskModal({ open, onClose }: { open: boolean; onClose: () 
   const [description, setDescription] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { data: projects = [] } = useQuery(projectQueries.list());
 
   useEffect(() => {
@@ -40,7 +42,7 @@ export function CreateTaskModal({ open, onClose }: { open: boolean; onClose: () 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     requestNotificationPermission();
-    await createTask({
+    const task = await createTask({
       projectId,
       title,
       description: description || undefined,
@@ -49,6 +51,7 @@ export function CreateTaskModal({ open, onClose }: { open: boolean; onClose: () 
     setDescription("");
     onClose();
     queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
+    navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
   }
 
   return (

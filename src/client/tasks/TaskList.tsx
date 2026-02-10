@@ -1,28 +1,23 @@
-import type { Task, Project } from "../../shared/types.ts";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
+import type { Task } from "../../shared/types.ts";
+import { projectQueries } from "../projects/queries.ts";
+import { taskQueries } from "./queries.ts";
 
-function TaskItem({
-  task,
-  selected,
-  onSelect,
-}: {
-  task: Task;
-  selected: boolean;
-  onSelect: (id: string) => void;
-}) {
+function TaskItem({ task }: { task: Task }) {
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(task.id)}
-      className={`block w-full text-left px-3 py-2 text-sm border-b hover:bg-gray-50 ${
-        selected ? "bg-blue-50 border-l-2 border-l-blue-500" : ""
-      }`}
+    <Link
+      to="/tasks/$taskId"
+      params={{ taskId: task.id }}
+      className="block w-full text-left px-3 py-2 text-sm border-b hover:bg-gray-50"
+      activeProps={{ className: "bg-blue-50 border-l-2 border-l-blue-500" }}
     >
       <div className="flex items-center gap-2">
         {task.pinned && <span className="text-yellow-500 text-xs">pin</span>}
         <span className="truncate">{task.title}</span>
         <span className="ml-auto text-xs text-gray-400">{task.status}</span>
       </div>
-    </button>
+    </Link>
   );
 }
 
@@ -36,21 +31,12 @@ function groupByProject(tasks: Task[]) {
   return grouped;
 }
 
-export function TaskListPanel({
-  activeTasks,
-  backlogTasks,
-  pinnedTasks,
-  projects,
-  selectedTaskId,
-  onSelectTask,
-}: {
-  activeTasks: Task[];
-  backlogTasks: Task[];
-  pinnedTasks: Task[];
-  projects: Project[];
-  selectedTaskId: string | null;
-  onSelectTask: (id: string) => void;
-}) {
+export function TaskListPanel() {
+  const { data: projects = [] } = useQuery(projectQueries.list());
+  const { data: activeTasks = [] } = useQuery(taskQueries.active());
+  const { data: backlogTasks = [] } = useQuery(taskQueries.backlog());
+  const { data: pinnedTasks = [] } = useQuery(taskQueries.pinned());
+
   const projectMap = new Map(projects.map((p) => [p.id, p]));
 
   const activeGrouped = groupByProject(activeTasks);
@@ -71,12 +57,7 @@ export function TaskListPanel({
           {projectMap.get(projectId)?.name ?? projectId}
         </div>
         {tasks.map((task) => (
-          <TaskItem
-            key={task.id}
-            task={task}
-            selected={task.id === selectedTaskId}
-            onSelect={onSelectTask}
-          />
+          <TaskItem key={task.id} task={task} />
         ))}
       </div>
     ));
@@ -90,12 +71,7 @@ export function TaskListPanel({
             Pinned
           </div>
           {pinnedOnly.map((task) => (
-            <TaskItem
-              key={task.id}
-              task={task}
-              selected={task.id === selectedTaskId}
-              onSelect={onSelectTask}
-            />
+            <TaskItem key={task.id} task={task} />
           ))}
         </div>
       )}
