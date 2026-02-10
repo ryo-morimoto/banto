@@ -7,6 +7,7 @@ import type { AttachmentService } from "../attachments/service.ts";
 import { runAgent } from "./agent.ts";
 import { generateSlug } from "./slugify.ts";
 import { getWorktreePath, createWorktree, removeWorktree } from "./worktree.ts";
+import { logStore } from "./log-store.ts";
 import { logger } from "../logger.ts";
 
 function copyAttachmentsToProject(
@@ -119,6 +120,8 @@ export function createRunner(
               error: err instanceof Error ? err.message : String(err),
             });
           }
+          // Clear log store after a grace period so SSE clients receive remaining logs
+          setTimeout(() => logStore.clear(sessionId), 30_000);
         });
     },
   };
