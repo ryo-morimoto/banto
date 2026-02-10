@@ -1,6 +1,7 @@
 import "./global.css";
 import { StrictMode, useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
+import { QueryClientProvider } from "@tanstack/react-query";
 import type { Project, Task, Session } from "../src/shared/types.ts";
 import { listProjects } from "../src/client/projects/api.ts";
 import {
@@ -16,6 +17,7 @@ import { TaskListPanel } from "../src/client/tasks/TaskList.tsx";
 import { TaskInfoPanel } from "../src/client/tasks/TaskInfoPanel.tsx";
 import { SessionChatPanel } from "../src/client/sessions/SessionChatPanel.tsx";
 import { sendNotification } from "../src/client/notifications.ts";
+import { queryClient } from "../src/client/queryClient.ts";
 
 import { ErrorBoundary, reportErrorToServer } from "../src/client/ErrorBoundary.tsx";
 import { ApiError } from "../src/client/api.ts";
@@ -255,8 +257,10 @@ function App() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    </QueryClientProvider>
   </StrictMode>,
 );
