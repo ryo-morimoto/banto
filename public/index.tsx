@@ -1,13 +1,16 @@
 import "./global.css";
-import { StrictMode, useState, useEffect, useCallback } from "react";
+import { StrictMode, useState, useEffect, useCallback, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import type { Project, Task } from "../src/shared/types.ts";
+import type { Project, Task, Session } from "../src/shared/types.ts";
 import { listProjects } from "../src/client/projects/api.ts";
 import { listActiveTasks, listBacklogTasks, listPinnedTasks, getTask } from "../src/client/tasks/api.ts";
+import { listSessionsByTask } from "../src/client/sessions/api.ts";
 import { ProjectManager } from "../src/client/projects/ProjectManager.tsx";
 import { CreateTask } from "../src/client/tasks/CreateTask.tsx";
 import { TaskListPanel } from "../src/client/tasks/TaskList.tsx";
-import { TaskDetail } from "../src/client/tasks/TaskDetail.tsx";
+import { TaskInfoPanel } from "../src/client/tasks/TaskInfoPanel.tsx";
+import { SessionChatPanel } from "../src/client/sessions/SessionChatPanel.tsx";
+import { sendNotification } from "../src/client/notifications.ts";
 
 import { ErrorBoundary, reportErrorToServer } from "../src/client/ErrorBoundary.tsx";
 import { ApiError } from "../src/client/api.ts";
@@ -32,6 +35,7 @@ function App() {
   const [pinnedTasks, setPinnedTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [latestSession, setLatestSession] = useState<Session | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const refreshProjects = useCallback(async () => {
@@ -62,10 +66,51 @@ function App() {
   useEffect(() => {
     if (!selectedTaskId) {
       setSelectedTask(null);
+      setLatestSession(null);
       return;
     }
     getTask(selectedTaskId).then(setSelectedTask);
   }, [selectedTaskId]);
+
+  const refreshSession = useCallback(async () => {
+    if (!selectedTaskId) return;
+    const sessions = await listSessionsByTask(selectedTaskId);
+    setLatestSession(sessions[0] ?? null);
+  }, [selectedTaskId]);
+
+  useEffect(() => {
+    refreshSession();
+  }, [refreshSession]);
+
+  // Track previous session status for notifications
+  const prevSessionStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!latestSession || !selectedTask) return;
+    const prev = prevSessionStatusRef.current;
+    if (prev && prev !== latestSession.status) {
+      if (latestSession.status === "done") {
+        sendNotification("banto", `セッション完了: ${selectedTask.title}`);
+      } else if (latestSession.status === "failed") {
+        sendNotification("banto", `セッション失敗: ${selectedTask.title}`);
+      }
+    }
+    prevSessionStatusRef.current = latestSession.status;
+  }, [latestSession, selectedTask]);
+
+  // Poll session every 2s when there's an active session
+  useEffect(() => {
+    if (
+      !latestSession ||
+      (latestSession.status !== "pending" &&
+        latestSession.status !== "provisioning" &&
+        latestSession.status !== "running")
+    ) {
+      return;
+    }
+    const interval = setInterval(refreshSession, 2000);
+    return () => clearInterval(interval);
+  }, [latestSession, refreshSession]);
 
   async function handleTaskUpdated() {
     await refreshTasks();
@@ -110,13 +155,12 @@ function App() {
           />
         )}
 
-        {/* Sidebar: overlay on mobile, static on desktop */}
+        {/* Left: Task list sidebar */}
         <aside
-          className={`fixed inset-y-0 left-0 z-30 w-72 bg-white border-r transform transition-transform duration-200 ease-in-out md:static md:translate-x-0 md:flex-shrink-0 ${
+          className={`fixed inset-y-0 left-0 z-30 w-64 bg-white border-r transform transition-transform duration-200 ease-in-out md:static md:translate-x-0 md:flex-shrink-0 ${
             sidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
-          {/* Offset for header height on mobile */}
           <div className="h-full pt-11 md:pt-0">
             <TaskListPanel
               activeTasks={activeTasks}
@@ -129,12 +173,34 @@ function App() {
           </div>
         </aside>
 
-        <main className="flex-1 bg-gray-50 min-w-0">
+        {/* Middle: Task info panel */}
+        <section className="w-80 flex-shrink-0 border-r bg-white hidden md:block">
           {selectedTask ? (
-            <TaskDetail task={selectedTask} onUpdated={handleTaskUpdated} />
+            <TaskInfoPanel
+              task={selectedTask}
+              latestSession={latestSession}
+              onUpdated={handleTaskUpdated}
+              onSessionStarted={refreshSession}
+            />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-400 text-sm">
               タスクを選択してください
+            </div>
+          )}
+        </section>
+
+        {/* Right: Session chat panel */}
+        <main className="flex-1 bg-gray-50 min-w-0">
+          {selectedTask ? (
+            <SessionChatPanel
+              session={latestSession}
+              taskId={selectedTask.id}
+              taskStatus={selectedTask.status}
+              onSessionStarted={refreshSession}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-gray-400 text-sm">
+              セッション
             </div>
           )}
         </main>
