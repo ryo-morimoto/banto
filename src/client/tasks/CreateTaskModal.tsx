@@ -1,23 +1,17 @@
 import { useState, useEffect, useRef } from "react";
-import type { Project } from "../../shared/types.ts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createTask } from "./api.ts";
 import { requestNotificationPermission } from "../notifications.ts";
+import { projectQueries } from "../projects/queries.ts";
+import { taskQueries } from "./queries.ts";
 
-export function CreateTaskModal({
-  projects,
-  open,
-  onClose,
-  onCreated,
-}: {
-  projects: Project[];
-  open: boolean;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
+export function CreateTaskModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [projectId, setProjectId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
+  const { data: projects = [] } = useQuery(projectQueries.list());
 
   useEffect(() => {
     if (open && projects.length > 0 && !projectId) {
@@ -54,7 +48,7 @@ export function CreateTaskModal({
     setTitle("");
     setDescription("");
     onClose();
-    onCreated();
+    queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
   }
 
   return (

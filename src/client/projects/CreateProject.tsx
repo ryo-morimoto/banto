@@ -1,11 +1,14 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createProject } from "./api.ts";
+import { projectQueries } from "./queries.ts";
 
-export function CreateProject({ onCreated }: { onCreated: () => void }) {
+export function CreateProject() {
   const [name, setName] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [open, setOpen] = useState(false);
+  const queryClient = useQueryClient();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -18,7 +21,7 @@ export function CreateProject({ onCreated }: { onCreated: () => void }) {
     setLocalPath("");
     setRepoUrl("");
     setOpen(false);
-    onCreated();
+    queryClient.invalidateQueries({ queryKey: projectQueries.all() });
   }
 
   if (!open) {

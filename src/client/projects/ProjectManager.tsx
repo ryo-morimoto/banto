@@ -1,20 +1,17 @@
 import { useState } from "react";
-import type { Project } from "../../shared/types.ts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { deleteProject } from "./api.ts";
+import { projectQueries } from "./queries.ts";
 import { CreateProject } from "./CreateProject.tsx";
 
-export function ProjectManager({
-  projects,
-  onChanged,
-}: {
-  projects: Project[];
-  onChanged: () => void;
-}) {
+export function ProjectManager() {
   const [open, setOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: projects = [] } = useQuery(projectQueries.list());
 
   async function handleDelete(id: string) {
     await deleteProject(id);
-    onChanged();
+    queryClient.invalidateQueries({ queryKey: projectQueries.all() });
   }
 
   if (!open) {
@@ -61,7 +58,7 @@ export function ProjectManager({
         )}
 
         <div className="mt-3">
-          <CreateProject onCreated={onChanged} />
+          <CreateProject />
         </div>
       </div>
     </>

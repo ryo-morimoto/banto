@@ -1,23 +1,17 @@
 import "./global.css";
-import { StrictMode, useState, useEffect, useCallback, useRef } from "react";
+import { StrictMode, useState, useEffect, useCallback } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClientProvider } from "@tanstack/react-query";
-import type { Project, Task, Session } from "../src/shared/types.ts";
-import { listProjects } from "../src/client/projects/api.ts";
-import {
-  listActiveTasks,
-  listBacklogTasks,
-  listPinnedTasks,
-  getTask,
-} from "../src/client/tasks/api.ts";
+import { QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { Session } from "../src/shared/types.ts";
 import { listSessionsByTask } from "../src/client/sessions/api.ts";
 import { ProjectManager } from "../src/client/projects/ProjectManager.tsx";
 import { CreateTaskModal } from "../src/client/tasks/CreateTaskModal.tsx";
 import { TaskListPanel } from "../src/client/tasks/TaskList.tsx";
 import { TaskInfoPanel } from "../src/client/tasks/TaskInfoPanel.tsx";
 import { SessionChatPanel } from "../src/client/sessions/SessionChatPanel.tsx";
-import { sendNotification } from "../src/client/notifications.ts";
 import { queryClient } from "../src/client/queryClient.ts";
+import { projectQueries } from "../src/client/projects/queries.ts";
+import { taskQueries } from "../src/client/tasks/queries.ts";
 
 import { ErrorBoundary, reportErrorToServer } from "../src/client/ErrorBoundary.tsx";
 import { ApiError } from "../src/client/api.ts";
@@ -36,68 +30,22 @@ window.addEventListener("error", (event) => {
 });
 
 function App() {
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [activeTasks, setActiveTasks] = useState<Task[]>([]);
-  const [backlogTasks, setBacklogTasks] = useState<Task[]>([]);
-  const [pinnedTasks, setPinnedTasks] = useState<Task[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [latestSession, setLatestSession] = useState<Session | null>(null);
-  const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
 
-  const refreshProjects = useCallback(async () => {
-    setProjects(await listProjects());
-  }, []);
+  const queryClientRef = useQueryClient();
+  const { data: projects = [] } = useQuery(projectQueries.list());
+  const { data: activeTasks = [] } = useQuery(taskQueries.active());
+  const { data: backlogTasks = [] } = useQuery(taskQueries.backlog());
+  const { data: pinnedTasks = [] } = useQuery(taskQueries.pinned());
+  const { data: selectedTask = null } = useQuery({
+    ...taskQueries.detail(selectedTaskId!),
+    enabled: !!selectedTaskId,
+  });
 
-  const refreshTasks = useCallback(async () => {
-    const [active, backlog, pinned] = await Promise.all([
-      listActiveTasks(),
-      listBacklogTasks(),
-      listPinnedTasks(),
-    ]);
-    setActiveTasks(active);
-    setBacklogTasks(backlog);
-    setPinnedTasks(pinned);
-
-    // Check which active tasks have running sessions
-    const sessionChecks = await Promise.all(
-      active.map(async (t) => {
-        const sessions = await listSessionsByTask(t.id);
-        const latest = sessions[0];
-        if (
-          latest &&
-          (latest.status === "pending" ||
-            latest.status === "provisioning" ||
-            latest.status === "running")
-        ) {
-          return t.id;
-        }
-        return null;
-      }),
-    );
-    setRunningTaskIds(new Set(sessionChecks.filter((id): id is string => id !== null)));
-  }, []);
-
-  const refreshAll = useCallback(async () => {
-    await Promise.all([refreshProjects(), refreshTasks()]);
-  }, [refreshProjects, refreshTasks]);
-
-  useEffect(() => {
-    refreshAll();
-    const interval = setInterval(refreshTasks, 5000);
-    return () => clearInterval(interval);
-  }, [refreshAll, refreshTasks]);
-
-  useEffect(() => {
-    if (!selectedTaskId) {
-      setSelectedTask(null);
-      setLatestSession(null);
-      return;
-    }
-    getTask(selectedTaskId).then(setSelectedTask);
-  }, [selectedTaskId]);
+  // Session state (temporary — will move to child components in Phase 1-2)
+  const [latestSession, setLatestSession] = useState<Session | null>(null);
 
   const refreshSession = useCallback(async () => {
     if (!selectedTaskId) return;
@@ -106,24 +54,12 @@ function App() {
   }, [selectedTaskId]);
 
   useEffect(() => {
-    refreshSession();
-  }, [refreshSession]);
-
-  // Track previous session status for notifications
-  const prevSessionStatusRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!latestSession || !selectedTask) return;
-    const prev = prevSessionStatusRef.current;
-    if (prev && prev !== latestSession.status) {
-      if (latestSession.status === "done") {
-        sendNotification("banto", `セッション完了: ${selectedTask.title}`);
-      } else if (latestSession.status === "failed") {
-        sendNotification("banto", `セッション失敗: ${selectedTask.title}`);
-      }
+    if (!selectedTaskId) {
+      setLatestSession(null);
+      return;
     }
-    prevSessionStatusRef.current = latestSession.status;
-  }, [latestSession, selectedTask]);
+    refreshSession();
+  }, [selectedTaskId, refreshSession]);
 
   // Poll session every 2s when there's an active session
   useEffect(() => {
@@ -139,11 +75,8 @@ function App() {
     return () => clearInterval(interval);
   }, [latestSession, refreshSession]);
 
-  async function handleTaskUpdated() {
-    await refreshTasks();
-    if (selectedTaskId) {
-      setSelectedTask(await getTask(selectedTaskId));
-    }
+  function handleTaskUpdated() {
+    queryClientRef.invalidateQueries({ queryKey: taskQueries.all() });
   }
 
   function handleSelectTask(id: string) {
@@ -180,7 +113,7 @@ function App() {
           >
             + タスク追加
           </button>
-          <ProjectManager projects={projects} onChanged={refreshAll} />
+          <ProjectManager />
         </div>
       </header>
 
@@ -206,7 +139,6 @@ function App() {
               pinnedTasks={pinnedTasks}
               projects={projects}
               selectedTaskId={selectedTaskId}
-              runningTaskIds={runningTaskIds}
               onSelectTask={handleSelectTask}
             />
           </div>
@@ -245,12 +177,7 @@ function App() {
         </main>
       </div>
 
-      <CreateTaskModal
-        projects={projects}
-        open={createTaskOpen}
-        onClose={() => setCreateTaskOpen(false)}
-        onCreated={refreshTasks}
-      />
+      <CreateTaskModal open={createTaskOpen} onClose={() => setCreateTaskOpen(false)} />
     </div>
   );
 }
