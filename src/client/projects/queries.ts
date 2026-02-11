@@ -1,5 +1,5 @@
-import { queryOptions } from "@tanstack/react-query";
-import { listProjects } from "./api.ts";
+import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { listProjects, createProject, deleteProject } from "./api.ts";
 
 export const projectQueries = {
   all: () => ["projects"] as const,
@@ -10,3 +10,23 @@ export const projectQueries = {
       staleTime: 5 * 60 * 1000,
     }),
 };
+
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createProject,
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: projectQueries.all() });
+    },
+  });
+}
+
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteProject(id),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: projectQueries.all() });
+    },
+  });
+}

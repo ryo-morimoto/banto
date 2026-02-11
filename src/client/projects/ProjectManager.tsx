@@ -1,18 +1,12 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { deleteProject } from "./api.ts";
-import { projectQueries } from "./queries.ts";
+import { useQuery } from "@tanstack/react-query";
+import { projectQueries, useDeleteProject } from "./queries.ts";
 import { CreateProject } from "./CreateProject.tsx";
 
 export function ProjectManager() {
   const [open, setOpen] = useState(false);
-  const queryClient = useQueryClient();
   const { data: projects = [] } = useQuery(projectQueries.list());
-
-  async function handleDelete(id: string) {
-    await deleteProject(id);
-    queryClient.invalidateQueries({ queryKey: projectQueries.all() });
-  }
+  const deleteProjectMutation = useDeleteProject();
 
   if (!open) {
     return (
@@ -45,8 +39,9 @@ export function ProjectManager() {
             </div>
             <button
               type="button"
-              onClick={() => handleDelete(p.id)}
-              className="text-xs text-red-500 hover:text-red-700 flex-shrink-0"
+              onClick={() => deleteProjectMutation.mutate(p.id)}
+              disabled={deleteProjectMutation.isPending}
+              className="text-xs text-red-500 hover:text-red-700 flex-shrink-0 disabled:opacity-50"
             >
               削除
             </button>

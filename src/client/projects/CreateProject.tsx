@@ -1,18 +1,16 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { createProject } from "./api.ts";
-import { projectQueries } from "./queries.ts";
+import { useCreateProject } from "./queries.ts";
 
 export function CreateProject() {
   const [name, setName] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [open, setOpen] = useState(false);
-  const queryClient = useQueryClient();
+  const createProjectMutation = useCreateProject();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await createProject({
+    await createProjectMutation.mutateAsync({
       name,
       localPath,
       repoUrl: repoUrl || undefined,
@@ -21,7 +19,6 @@ export function CreateProject() {
     setLocalPath("");
     setRepoUrl("");
     setOpen(false);
-    queryClient.invalidateQueries({ queryKey: projectQueries.all() });
   }
 
   if (!open) {
@@ -59,7 +56,11 @@ export function CreateProject() {
         className="block w-full border px-2 py-1 text-sm"
       />
       <div className="flex gap-2">
-        <button type="submit" className="text-sm bg-blue-600 text-white px-3 py-1 rounded">
+        <button
+          type="submit"
+          disabled={createProjectMutation.isPending}
+          className="text-sm bg-blue-600 text-white px-3 py-1 rounded disabled:opacity-50"
+        >
           作成
         </button>
         <button type="button" onClick={() => setOpen(false)} className="text-sm text-gray-500">

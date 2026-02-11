@@ -1,19 +1,18 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { createTask } from "./api.ts";
 import { requestNotificationPermission } from "../notifications.ts";
 import { projectQueries } from "../projects/queries.ts";
-import { taskQueries } from "./queries.ts";
+import { useCreateTask } from "./queries.ts";
 
 export function CreateTaskModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [projectId, setProjectId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { data: projects = [] } = useQuery(projectQueries.list());
+  const createTaskMutation = useCreateTask();
 
   useEffect(() => {
     if (open && projects.length > 0 && !projectId) {
@@ -42,7 +41,7 @@ export function CreateTaskModal({ open, onClose }: { open: boolean; onClose: () 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     requestNotificationPermission();
-    const task = await createTask({
+    const task = await createTaskMutation.mutateAsync({
       projectId,
       title,
       description: description || undefined,
@@ -50,7 +49,6 @@ export function CreateTaskModal({ open, onClose }: { open: boolean; onClose: () 
     setTitle("");
     setDescription("");
     onClose();
-    queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
     navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
   }
 
@@ -92,7 +90,11 @@ export function CreateTaskModal({ open, onClose }: { open: boolean; onClose: () 
             className="block w-full border px-2 py-1.5 text-sm rounded"
           />
           <div className="flex gap-2 pt-2">
-            <button type="submit" className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded">
+            <button
+              type="submit"
+              disabled={createTaskMutation.isPending}
+              className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded disabled:opacity-50"
+            >
               作成
             </button>
             <button type="button" onClick={onClose} className="text-sm text-gray-500 px-3 py-1.5">

@@ -1,19 +1,21 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { Task } from "../../shared/types.ts";
 import {
-  activateTask,
-  completeTask,
-  reopenTask,
-  pinTask,
-  unpinTask,
-  updateTaskDescription,
-} from "./api.ts";
-import { startSession } from "../sessions/api.ts";
-import { uploadAttachment, deleteAttachment } from "../attachments/api.ts";
-import { taskQueries } from "./queries.ts";
+  useActivateTask,
+  useCompleteTask,
+  useReopenTask,
+  usePinTask,
+  useUnpinTask,
+  useUpdateDescription,
+} from "./queries.ts";
+import { useStartSession } from "../sessions/queries.ts";
 import { sessionQueries } from "../sessions/queries.ts";
-import { attachmentQueries } from "../attachments/queries.ts";
+import {
+  attachmentQueries,
+  useUploadAttachment,
+  useDeleteAttachment,
+} from "../attachments/queries.ts";
 import { sendNotification } from "../notifications.ts";
 
 function isActiveSession(status: string) {
@@ -25,26 +27,20 @@ function isActiveSession(status: string) {
   );
 }
 
-function DescriptionEditor({
-  taskId,
-  initial,
-  onSaved,
-}: {
-  taskId: string;
-  initial: string | null;
-  onSaved: () => void;
-}) {
+function DescriptionEditor({ taskId, initial }: { taskId: string; initial: string | null }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(initial ?? "");
+  const updateDescription = useUpdateDescription();
 
   useEffect(() => {
     setValue(initial ?? "");
   }, [initial]);
 
-  async function handleSave() {
-    await updateTaskDescription(taskId, value);
-    setEditing(false);
-    onSaved();
+  function handleSave() {
+    updateDescription.mutate(
+      { id: taskId, description: value },
+      { onSuccess: () => setEditing(false) },
+    );
   }
 
   if (!editing) {
@@ -83,7 +79,8 @@ function DescriptionEditor({
         <button
           type="button"
           onClick={handleSave}
-          className="text-xs bg-blue-600 text-white px-3 py-1 rounded"
+          disabled={updateDescription.isPending}
+          className="text-xs bg-blue-600 text-white px-3 py-1 rounded disabled:opacity-50"
         >
           保存
         </button>
@@ -103,10 +100,18 @@ function DescriptionEditor({
 }
 
 export function TaskInfoPanel({ task }: { task: Task }) {
-  const queryClient = useQueryClient();
   const { data: attachments = [] } = useQuery(attachmentQueries.byTask(task.id));
   const sessionsQuery = useQuery(sessionQueries.byTask(task.id));
   const latestSession = sessionsQuery.data?.[0] ?? null;
+
+  const activateMutation = useActivateTask();
+  const completeMutation = useCompleteTask();
+  const reopenMutation = useReopenTask();
+  const pinMutation = usePinTask();
+  const unpinMutation = useUnpinTask();
+  const startSessionMutation = useStartSession();
+  const uploadMutation = useUploadAttachment();
+  const deleteMutation = useDeleteAttachment(task.id);
 
   // Notification status tracking
   const prevStatusRef = useRef<Map<string, string>>(new Map());
@@ -137,11 +142,7 @@ export function TaskInfoPanel({ task }: { task: Task }) {
           e.preventDefault();
           const file = item.getAsFile();
           if (file) {
-            uploadAttachment(task.id, file).then(() =>
-              queryClient.invalidateQueries({
-                queryKey: attachmentQueries.byTask(task.id).queryKey,
-              }),
-            );
+            uploadMutation.mutate({ taskId: task.id, file });
           }
           return;
         }
@@ -149,28 +150,15 @@ export function TaskInfoPanel({ task }: { task: Task }) {
     }
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
-  }, [task.id, queryClient]);
-
-  function handleTaskUpdated() {
-    queryClient.invalidateQueries({ queryKey: taskQueries.all() });
-  }
-
-  async function handleAction(action: () => Promise<unknown>) {
-    await action();
-    handleTaskUpdated();
-  }
-
-  async function handleStartSession() {
-    await startSession(task.id);
-    queryClient.invalidateQueries({ queryKey: sessionQueries.byTask(task.id).queryKey });
-  }
-
-  async function handleDeleteAttachment(id: string) {
-    await deleteAttachment(id);
-    queryClient.invalidateQueries({ queryKey: attachmentQueries.byTask(task.id).queryKey });
-  }
+  }, [task.id, uploadMutation.mutate]);
 
   const hasActiveSession = latestSession ? isActiveSession(latestSession.status) : false;
+  const anyPending =
+    activateMutation.isPending ||
+    completeMutation.isPending ||
+    reopenMutation.isPending ||
+    pinMutation.isPending ||
+    unpinMutation.isPending;
 
   return (
     <div className="p-3 md:p-4 h-full overflow-y-auto">
@@ -182,7 +170,7 @@ export function TaskInfoPanel({ task }: { task: Task }) {
         </div>
       </div>
 
-      <DescriptionEditor taskId={task.id} initial={task.description} onSaved={handleTaskUpdated} />
+      <DescriptionEditor taskId={task.id} initial={task.description} />
 
       {attachments.length > 0 && (
         <div className="mb-4">
@@ -199,7 +187,8 @@ export function TaskInfoPanel({ task }: { task: Task }) {
                 />
                 <button
                   type="button"
-                  onClick={() => handleDeleteAttachment(a.id)}
+                  onClick={() => deleteMutation.mutate(a.id)}
+                  disabled={deleteMutation.isPending}
                   className="absolute -top-1 -right-1 hidden group-hover:block bg-red-500 text-white rounded-full w-4 h-4 text-xs leading-4 text-center"
                 >
                   x
@@ -219,8 +208,9 @@ export function TaskInfoPanel({ task }: { task: Task }) {
         {task.status === "backlog" && (
           <button
             type="button"
-            onClick={() => handleAction(() => activateTask(task.id))}
-            className="text-xs bg-blue-600 text-white px-3 py-1 rounded"
+            onClick={() => activateMutation.mutate(task.id)}
+            disabled={anyPending}
+            className="text-xs bg-blue-600 text-white px-3 py-1 rounded disabled:opacity-50"
           >
             Activate
           </button>
@@ -229,16 +219,18 @@ export function TaskInfoPanel({ task }: { task: Task }) {
           <>
             <button
               type="button"
-              onClick={() => handleAction(() => completeTask(task.id))}
-              className="text-xs bg-green-600 text-white px-3 py-1 rounded"
+              onClick={() => completeMutation.mutate(task.id)}
+              disabled={anyPending}
+              className="text-xs bg-green-600 text-white px-3 py-1 rounded disabled:opacity-50"
             >
               Complete
             </button>
             {!hasActiveSession && (
               <button
                 type="button"
-                onClick={handleStartSession}
-                className="text-xs bg-purple-600 text-white px-3 py-1 rounded"
+                onClick={() => startSessionMutation.mutate(task.id)}
+                disabled={startSessionMutation.isPending}
+                className="text-xs bg-purple-600 text-white px-3 py-1 rounded disabled:opacity-50"
               >
                 Start Session
               </button>
@@ -248,8 +240,9 @@ export function TaskInfoPanel({ task }: { task: Task }) {
         {task.status === "done" && (
           <button
             type="button"
-            onClick={() => handleAction(() => reopenTask(task.id))}
-            className="text-xs bg-orange-600 text-white px-3 py-1 rounded"
+            onClick={() => reopenMutation.mutate(task.id)}
+            disabled={anyPending}
+            className="text-xs bg-orange-600 text-white px-3 py-1 rounded disabled:opacity-50"
           >
             Reopen
           </button>
@@ -257,16 +250,18 @@ export function TaskInfoPanel({ task }: { task: Task }) {
         {task.pinned ? (
           <button
             type="button"
-            onClick={() => handleAction(() => unpinTask(task.id))}
-            className="text-xs border px-3 py-1 rounded"
+            onClick={() => unpinMutation.mutate(task.id)}
+            disabled={anyPending}
+            className="text-xs border px-3 py-1 rounded disabled:opacity-50"
           >
             Unpin
           </button>
         ) : (
           <button
             type="button"
-            onClick={() => handleAction(() => pinTask(task.id))}
-            className="text-xs border px-3 py-1 rounded"
+            onClick={() => pinMutation.mutate(task.id)}
+            disabled={anyPending}
+            className="text-xs border px-3 py-1 rounded disabled:opacity-50"
           >
             Pin
           </button>

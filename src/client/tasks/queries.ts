@@ -1,5 +1,17 @@
-import { queryOptions, keepPreviousData } from "@tanstack/react-query";
-import { listActiveTasks, listBacklogTasks, listPinnedTasks, getTask } from "./api.ts";
+import { queryOptions, keepPreviousData, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  listActiveTasks,
+  listBacklogTasks,
+  listPinnedTasks,
+  getTask,
+  createTask,
+  activateTask,
+  completeTask,
+  reopenTask,
+  pinTask,
+  unpinTask,
+  updateTaskDescription,
+} from "./api.ts";
 
 export const taskQueries = {
   all: () => ["tasks"] as const,
@@ -29,3 +41,74 @@ export const taskQueries = {
       placeholderData: keepPreviousData,
     }),
 };
+
+export function useCreateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createTask,
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.lists() });
+    },
+  });
+}
+
+export function useActivateTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => activateTask(id),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+    },
+  });
+}
+
+export function useCompleteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => completeTask(id),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+    },
+  });
+}
+
+export function useReopenTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => reopenTask(id),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+    },
+  });
+}
+
+export function usePinTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => pinTask(id),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+    },
+  });
+}
+
+export function useUnpinTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unpinTask(id),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+    },
+  });
+}
+
+export function useUpdateDescription() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, description }: { id: string; description: string }) =>
+      updateTaskDescription(id, description),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+    },
+  });
+}

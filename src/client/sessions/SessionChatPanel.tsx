@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { Task } from "../../shared/types.ts";
-import { startSession } from "./api.ts";
-import { sessionQueries } from "./queries.ts";
+import { sessionQueries, useStartSession } from "./queries.ts";
 import { ChatMessage } from "./ChatMessage.tsx";
 
 interface LogEntry {
@@ -23,8 +22,8 @@ function isActiveSession(status: string) {
 export function SessionChatPanel({ task }: { task: Task }) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const queryClient = useQueryClient();
   const sessionsQuery = useQuery(sessionQueries.byTask(task.id));
+  const startSessionMutation = useStartSession();
   const session = sessionsQuery.data?.[0] ?? null;
   const activeSessionId = session && isActiveSession(session.status) ? session.id : null;
 
@@ -61,9 +60,8 @@ export function SessionChatPanel({ task }: { task: Task }) {
     }
   }, [session?.id]);
 
-  async function handleStartSession() {
-    await startSession(task.id);
-    queryClient.invalidateQueries({ queryKey: sessionQueries.byTask(task.id).queryKey });
+  function handleStartSession() {
+    startSessionMutation.mutate(task.id);
   }
 
   // No session state
@@ -75,7 +73,8 @@ export function SessionChatPanel({ task }: { task: Task }) {
           <button
             type="button"
             onClick={handleStartSession}
-            className="text-xs bg-purple-600 text-white px-4 py-1.5 rounded"
+            disabled={startSessionMutation.isPending}
+            className="text-xs bg-purple-600 text-white px-4 py-1.5 rounded disabled:opacity-50"
           >
             セッション開始
           </button>

@@ -1,6 +1,6 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Session } from "../../shared/types.ts";
-import { listSessionsByTask } from "./api.ts";
+import { listSessionsByTask, startSession } from "./api.ts";
 
 function hasActiveSession(sessions: Session[]): boolean {
   return sessions.some(
@@ -24,3 +24,15 @@ export const sessionQueries = {
       },
     }),
 };
+
+export function useStartSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => startSession(taskId),
+    onSettled: (_data, _error, taskId) => {
+      return queryClient.invalidateQueries({
+        queryKey: sessionQueries.byTask(taskId).queryKey,
+      });
+    },
+  });
+}
