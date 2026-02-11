@@ -1,7 +1,7 @@
 import "./global.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, QueryErrorResetBoundary } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { queryClient } from "../src/client/queryClient.ts";
 import { router } from "../src/client/router.ts";
@@ -24,9 +24,13 @@ window.addEventListener("error", (event) => {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ErrorBoundary>
-        <RouterProvider router={router} />
-      </ErrorBoundary>
+      <QueryErrorResetBoundary>
+        {({ reset }) => (
+          <ErrorBoundary onReset={reset}>
+            <RouterProvider router={router} />
+          </ErrorBoundary>
+        )}
+      </QueryErrorResetBoundary>
     </QueryClientProvider>
   </StrictMode>,
 );

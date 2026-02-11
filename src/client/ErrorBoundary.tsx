@@ -4,6 +4,7 @@ import { ApiError } from "./api.ts";
 
 interface Props {
   children: ReactNode;
+  onReset?: () => void;
 }
 
 interface State {
@@ -34,7 +35,10 @@ export class ErrorBoundary extends Component<Props, State> {
             <button
               type="button"
               className="px-3 py-1 text-sm border rounded hover:bg-gray-50"
-              onClick={() => this.setState({ error: null })}
+              onClick={() => {
+                this.props.onReset?.();
+                this.setState({ error: null });
+              }}
             >
               再試行
             </button>
