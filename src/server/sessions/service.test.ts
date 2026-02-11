@@ -146,6 +146,96 @@ describe("SessionService", () => {
     });
   });
 
+  describe("markWaitingForInput", () => {
+    it("transitions running to waiting_for_input", () => {
+      const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
+      taskService.activate(task.id);
+      const session = service.start(task.id);
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
+      service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
+
+      const updated = service.markWaitingForInput(session.id);
+
+      expect(updated.status).toBe("waiting_for_input");
+    });
+
+    it("throws when session is not running", () => {
+      const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
+      taskService.activate(task.id);
+      const session = service.start(task.id);
+
+      expect(() => service.markWaitingForInput(session.id)).toThrow();
+    });
+  });
+
+  describe("resumeFromWaiting", () => {
+    it("transitions waiting_for_input back to running", () => {
+      const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
+      taskService.activate(task.id);
+      const session = service.start(task.id);
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
+      service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
+      service.markWaitingForInput(session.id);
+
+      const updated = service.resumeFromWaiting(session.id);
+
+      expect(updated.status).toBe("running");
+    });
+
+    it("throws when session is not waiting_for_input", () => {
+      const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
+      taskService.activate(task.id);
+      const session = service.start(task.id);
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
+      service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
+
+      expect(() => service.resumeFromWaiting(session.id)).toThrow();
+    });
+  });
+
+  describe("markDone from waiting_for_input", () => {
+    it("transitions waiting_for_input to done", () => {
+      const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
+      taskService.activate(task.id);
+      const session = service.start(task.id);
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
+      service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
+      service.markWaitingForInput(session.id);
+
+      const updated = service.markDone(session.id);
+
+      expect(updated.status).toBe("done");
+    });
+  });
+
+  describe("markFailed from waiting_for_input", () => {
+    it("transitions waiting_for_input to failed", () => {
+      const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
+      taskService.activate(task.id);
+      const session = service.start(task.id);
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
+      service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
+      service.markWaitingForInput(session.id);
+
+      const updated = service.markFailed(session.id, "aborted");
+
+      expect(updated.status).toBe("failed");
+    });
+  });
+
+  describe("waiting_for_input is active session", () => {
+    it("counts as active session preventing concurrent start", () => {
+      const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });
+      taskService.activate(task.id);
+      const session = service.start(task.id);
+      service.markProvisioning(session.id, "banto-abc123", "/tmp/wt");
+      service.markRunning(session.id, "cc-sess-1", "fix/bug-123");
+      service.markWaitingForInput(session.id);
+
+      expect(() => service.start(task.id)).toThrow();
+    });
+  });
+
   describe("findByTaskId", () => {
     it("returns all sessions for a task", () => {
       const task = taskService.create({ projectId: "proj-1", title: "Fix bug" });

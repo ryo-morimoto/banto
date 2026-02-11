@@ -40,6 +40,17 @@ export function applySchema(db: Database) {
   `);
 
   db.run(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id          TEXT PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id),
+      role        TEXT NOT NULL,
+      content     TEXT NOT NULL,
+      tool_name   TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.run(`
     CREATE TABLE IF NOT EXISTS attachments (
       id            TEXT PRIMARY KEY,
       task_id       TEXT NOT NULL REFERENCES tasks(id),
@@ -50,9 +61,12 @@ export function applySchema(db: Database) {
     )
   `);
 
-  // Migration for existing databases (ALTER TABLE fails if column already exists)
+  // Migrations for existing databases (ALTER TABLE fails if column already exists)
   try {
     db.run("ALTER TABLE sessions ADD COLUMN worktree_path TEXT");
+  } catch {}
+  try {
+    db.run("ALTER TABLE sessions ADD COLUMN todos TEXT");
   } catch {}
 }
 

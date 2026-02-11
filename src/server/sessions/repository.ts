@@ -1,5 +1,5 @@
 import type { Database } from "bun:sqlite";
-import type { Session } from "../../shared/types.ts";
+import type { Session, TodoItem } from "../../shared/types.ts";
 
 interface SessionRow {
   id: string;
@@ -10,12 +10,23 @@ interface SessionRow {
   branch: string | null;
   worktree_path: string | null;
   error: string | null;
+  todos: string | null;
   created_at: string;
   completed_at: string | null;
 }
 
+function parseTodos(raw: string | null): TodoItem[] | null {
+  if (!raw) return null;
+  return JSON.parse(raw) as TodoItem[];
+}
+
 function toSession(row: SessionRow): Session {
-  const base = { id: row.id, taskId: row.task_id, createdAt: row.created_at };
+  const base = {
+    id: row.id,
+    taskId: row.task_id,
+    todos: parseTodos(row.todos),
+    createdAt: row.created_at,
+  };
 
   switch (row.status) {
     case "pending":
@@ -31,6 +42,15 @@ function toSession(row: SessionRow): Session {
       return {
         ...base,
         status: "running",
+        containerName: row.container_name!,
+        worktreePath: row.worktree_path!,
+        ccSessionId: row.cc_session_id!,
+        branch: row.branch!,
+      };
+    case "waiting_for_input":
+      return {
+        ...base,
+        status: "waiting_for_input",
         containerName: row.container_name!,
         worktreePath: row.worktree_path!,
         ccSessionId: row.cc_session_id!,
@@ -77,7 +97,7 @@ export function createSessionRepository(db: Database) {
     findActiveByTaskId(taskId: string): Session | null {
       const row = db
         .query(
-          "SELECT * FROM sessions WHERE task_id = ? AND status IN ('pending', 'provisioning', 'running')",
+          "SELECT * FROM sessions WHERE task_id = ? AND status IN ('pending', 'provisioning', 'running', 'waiting_for_input')",
         )
         .get(taskId) as SessionRow | null;
       return row ? toSession(row) : null;
@@ -85,7 +105,9 @@ export function createSessionRepository(db: Database) {
 
     findActive(): Session[] {
       const rows = db
-        .query("SELECT * FROM sessions WHERE status IN ('pending', 'provisioning', 'running')")
+        .query(
+          "SELECT * FROM sessions WHERE status IN ('pending', 'provisioning', 'running', 'waiting_for_input')",
+        )
         .all() as SessionRow[];
       return rows.map(toSession);
     },
@@ -93,6 +115,18 @@ export function createSessionRepository(db: Database) {
     insert(session: { id: string; taskId: string }): Session {
       db.query("INSERT INTO sessions (id, task_id) VALUES (?, ?)").run(session.id, session.taskId);
       return this.findById(session.id)!;
+    },
+
+    updateTodos(id: string, todos: TodoItem[]): void {
+      db.query("UPDATE sessions SET todos = ? WHERE id = ?").run(JSON.stringify(todos), id);
+    },
+
+    getTodos(id: string): TodoItem[] | null {
+      const row = db.query("SELECT todos FROM sessions WHERE id = ?").get(id) as {
+        todos: string | null;
+      } | null;
+      if (!row) return null;
+      return parseTodos(row.todos);
     },
 
     updateStatus(id: string, status: string, fields?: Record<string, string>): Session {

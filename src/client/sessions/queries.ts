@@ -4,7 +4,11 @@ import { listSessionsByTask } from "./api.ts";
 
 function hasActiveSession(sessions: Session[]): boolean {
   return sessions.some(
-    (s) => s.status === "pending" || s.status === "provisioning" || s.status === "running",
+    (s) =>
+      s.status === "pending" ||
+      s.status === "provisioning" ||
+      s.status === "running" ||
+      s.status === "waiting_for_input",
   );
 }
 

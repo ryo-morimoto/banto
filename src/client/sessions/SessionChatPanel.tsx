@@ -12,7 +12,12 @@ interface LogEntry {
 }
 
 function isActiveSession(status: string) {
-  return status === "pending" || status === "provisioning" || status === "running";
+  return (
+    status === "pending" ||
+    status === "provisioning" ||
+    status === "running" ||
+    status === "waiting_for_input"
+  );
 }
 
 export function SessionChatPanel({ task }: { task: Task }) {

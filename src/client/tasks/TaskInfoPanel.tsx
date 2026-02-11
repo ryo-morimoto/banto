@@ -17,7 +17,12 @@ import { attachmentQueries } from "../attachments/queries.ts";
 import { sendNotification } from "../notifications.ts";
 
 function isActiveSession(status: string) {
-  return status === "pending" || status === "provisioning" || status === "running";
+  return (
+    status === "pending" ||
+    status === "provisioning" ||
+    status === "running" ||
+    status === "waiting_for_input"
+  );
 }
 
 function DescriptionEditor({

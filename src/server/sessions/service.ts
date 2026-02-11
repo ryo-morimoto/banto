@@ -35,10 +35,26 @@ export function createSessionService(sessionRepo: SessionRepository, taskRepo: T
       return sessionRepo.updateStatus(id, "running", { cc_session_id: ccSessionId, branch });
     },
 
-    markDone(id: string) {
+    markWaitingForInput(id: string) {
       const session = sessionRepo.findById(id);
       if (!session) throw new Error("Session not found");
       if (session.status !== "running")
+        throw new Error(`Cannot mark waiting_for_input session in ${session.status} status`);
+      return sessionRepo.updateStatus(id, "waiting_for_input");
+    },
+
+    resumeFromWaiting(id: string) {
+      const session = sessionRepo.findById(id);
+      if (!session) throw new Error("Session not found");
+      if (session.status !== "waiting_for_input")
+        throw new Error(`Cannot resume session in ${session.status} status`);
+      return sessionRepo.updateStatus(id, "running");
+    },
+
+    markDone(id: string) {
+      const session = sessionRepo.findById(id);
+      if (!session) throw new Error("Session not found");
+      if (session.status !== "running" && session.status !== "waiting_for_input")
         throw new Error(`Cannot complete session in ${session.status} status`);
       return sessionRepo.updateStatus(id, "done", { completed_at: new Date().toISOString() });
     },
