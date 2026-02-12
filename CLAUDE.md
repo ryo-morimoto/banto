@@ -1,37 +1,37 @@
 # banto
 
-やりたいことをメモして、agentに投げて、結果を見るダッシュボード。NixOS mini PC上で動作する。
+A dashboard to jot down tasks, throw them at an agent, and watch the results. Runs on a NixOS mini PC.
 
-## 原則
+## Principles
 
-- CC一本足: マルチプロバイダー抽象化は作らない
-- 1セッション = 1コンテナ: セッションが実行の単位
-- ワンビュー: アクティブタスクがプロジェクト別に1画面に並ぶ
-- メモして、投げて、見る: タスク管理 → agent実行 → 結果確認
-- 見た目より機能: UIの装飾は後回し、動くことを優先
+- CC only: No multi-provider abstractions
+- 1 session = 1 unit of execution
+- One view: Active tasks listed by project on a single screen
+- Jot, throw, watch: Task management → agent execution → result review
+- Function over form: Prioritize working features over UI polish
 
-## スタック
+## Stack
 
 - Runtime: Bun
 - Backend: Elysia + Eden
 - Frontend: React + TanStack Router + TanStack Query
 - DB: bun:sqlite
-- WebSocket: Elysia組み込みWS
+- WebSocket: Elysia built-in WS
 - Styling: Tailwind CSS
 - Lint: oxlint
 - Format: oxfmt
-- 型チェック: tsgo
+- Type checking: tsgo
 
-## ディレクトリ構成
+## Directory Structure
 
-ドメインごとのco-locationを最優先する。技術レイヤでの分割はしない。
+Domain co-location is the top priority. No splitting by technical layer.
 
 ```
 src/
 ├── server.ts
 ├── server/
 │   ├── app.ts
-│   ├── db.ts                 # SQLite接続（共有リソース）
+│   ├── db.ts                 # SQLite connection (shared resource)
 │   ├── projects/
 │   │   ├── routes.ts
 │   │   ├── service.ts
@@ -44,18 +44,18 @@ src/
 │       ├── routes.ts
 │       ├── service.ts
 │       ├── repository.ts
-│       ├── runner.ts         # セッション実行オーケストレーション
-│       ├── container.ts      # nixos-container操作
-│       └── agent.ts          # Agent SDK操作
+│       ├── runner.ts         # Session execution orchestration
+│       ├── container.ts      # nixos-container operations
+│       └── agent.ts          # Agent SDK operations
 ├── client/
 │   ├── app.tsx
 │   ├── tasks/
-│   │   ├── TaskList.tsx      # 左パネル（pinned + プロジェクト別）
-│   │   ├── TaskDetail.tsx    # 右パネル（詳細 + セッション履歴）
-│   │   ├── CreateTask.tsx    # モーダル
+│   │   ├── TaskList.tsx      # Left panel (pinned + grouped by project)
+│   │   ├── TaskDetail.tsx    # Right panel (details + session history)
+│   │   ├── CreateTask.tsx    # Modal
 │   │   └── api.ts
 │   ├── sessions/
-│   │   ├── SessionDiff.tsx   # 別ページ（diff表示）
+│   │   ├── SessionDiff.tsx   # Separate page (diff view)
 │   │   └── api.ts
 │   ├── projects/
 │   │   ├── CreateProject.tsx
@@ -69,22 +69,26 @@ src/
     └── index.html
 ```
 
-## 開発ワークフロー: TDD（t-wada準拠）
+## Development Workflow: TDD (t-wada style)
 
-Red → Green → Refactor を厳密に守る。
+Strictly follow Red → Green → Refactor.
 
-1. **Red**: 失敗するテストを1つ書く。テストが失敗することを確認する
-2. **Green**: そのテストを通す最小限のコードを書く。テストが通ることを確認する
-3. **Refactor**: テストが通ったままコードを整理する
+1. **Red**: Write one failing test. Confirm it fails
+2. **Green**: Write the minimum code to pass that test. Confirm it passes
+3. **Refactor**: Clean up code while keeping tests green
 
-- テストなしにプロダクションコードを書かない
-- 一度に1つのテストだけ追加する
-- テストが通る最小限のコードだけ書く（先回りしない）
+- Never write production code without a test
+- Add only one test at a time
+- Write only the minimum code to pass the test (no anticipation)
 
-## コーディング規約
+## Coding Conventions
 
-- 言語: TypeScript
-- インポートはパスエイリアスを使う（`@/server/...`, `@/client/...`, `@/shared/...`）
-- ドメインに関するコードはすべてそのドメインのディレクトリに置く
-- 共有リソース（DB接続等）だけ外に出す
-- エラーハンドリングは境界（API層）でのみ行う。内部コードでは不要なtry-catchを書かない
+- Language: TypeScript
+- Use path aliases for imports (`@/server/...`, `@/client/...`, `@/shared/...`)
+- All domain-related code lives in its domain directory
+- Only shared resources (DB connection, etc.) live outside domain directories
+- Error handling only at boundaries (API layer). No unnecessary try-catch in internal code
+
+## Language Policy
+
+This project is OSS. All documentation, code comments, commit messages, PR descriptions, issues, and variable names must be written in English. Only UI-facing text may be in Japanese.
