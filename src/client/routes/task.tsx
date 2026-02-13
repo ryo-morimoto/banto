@@ -2,7 +2,7 @@ import { createRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { rootRoute } from "./root.tsx";
 import { TaskInfoPanel } from "../tasks/TaskInfoPanel.tsx";
-import { SessionChatPanel } from "../sessions/SessionChatPanel.tsx";
+import { TerminalView } from "../sessions/TerminalView.tsx";
 import { taskQueries } from "../tasks/queries.ts";
 
 export const taskRoute = createRoute({
@@ -13,7 +13,24 @@ export const taskRoute = createRoute({
 
 function TaskDetailPage() {
   const { taskId } = taskRoute.useParams();
-  const { data: task, isLoading, error } = useQuery(taskQueries.detail(taskId));
+  const {
+    data: task,
+    isLoading,
+    error,
+  } = useQuery({
+    ...taskQueries.detail(taskId),
+    refetchInterval: (query) => {
+      const t = query.state.data;
+      if (!t) return false;
+      // Poll while session is active
+      const active =
+        t.sessionStatus === "pending" ||
+        t.sessionStatus === "provisioning" ||
+        t.sessionStatus === "running" ||
+        t.sessionStatus === "waiting_for_input";
+      return active ? 2000 : false;
+    },
+  });
 
   if (isLoading) {
     return (
@@ -42,8 +59,14 @@ function TaskDetailPage() {
       <section className="w-80 flex-shrink-0 border-r bg-white hidden md:block">
         <TaskInfoPanel task={task} />
       </section>
-      <main className="flex-1 bg-gray-50 min-w-0">
-        <SessionChatPanel task={task} />
+      <main className="flex-1 bg-black min-w-0">
+        {task.sessionStatus ? (
+          <TerminalView taskId={task.id} sessionStatus={task.sessionStatus} />
+        ) : (
+          <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+            セッションなし
+          </div>
+        )}
       </main>
     </>
   );

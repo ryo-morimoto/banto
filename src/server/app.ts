@@ -20,8 +20,9 @@ export const apiApp = new Elysia({ prefix: "/api" })
       code === "NOT_FOUND" || (code === "UNKNOWN" && errMsg.toLowerCase().includes("not found"));
     const isValidation =
       code === "VALIDATION" || (code === "UNKNOWN" && errMsg.startsWith("Cannot "));
+    const isConflict = code === "UNKNOWN" && errMsg.includes("already has an active session");
 
-    const status = isNotFound ? 404 : isValidation ? 422 : 500;
+    const status = isConflict ? 409 : isNotFound ? 404 : isValidation ? 422 : 500;
     const level = status >= 500 ? "error" : "warn";
 
     logger[level](`${request.method} ${new URL(request.url).pathname} ${status}`, {
@@ -35,7 +36,13 @@ export const apiApp = new Elysia({ prefix: "/api" })
     return {
       error: {
         message: status >= 500 ? "Internal server error" : errMsg,
-        code: isNotFound ? "NOT_FOUND" : isValidation ? "VALIDATION" : "INTERNAL",
+        code: isConflict
+          ? "CONFLICT"
+          : isNotFound
+            ? "NOT_FOUND"
+            : isValidation
+              ? "VALIDATION"
+              : "INTERNAL",
         requestId,
       },
     };

@@ -9,8 +9,7 @@ import {
   useUnpinTask,
   useUpdateDescription,
 } from "./queries.ts";
-import { useStartSession } from "../sessions/queries.ts";
-import { sessionQueries } from "../sessions/queries.ts";
+import { useStartSession, useRetrySession } from "../sessions/queries.ts";
 import {
   attachmentQueries,
   useUploadAttachment,
@@ -18,7 +17,7 @@ import {
 } from "../attachments/queries.ts";
 import { sendNotification } from "../notifications.ts";
 
-function isActiveSession(status: string) {
+function isActiveSessionStatus(status: string | null): boolean {
   return (
     status === "pending" ||
     status === "provisioning" ||
@@ -101,8 +100,6 @@ function DescriptionEditor({ taskId, initial }: { taskId: string; initial: strin
 
 export function TaskInfoPanel({ task }: { task: Task }) {
   const { data: attachments = [] } = useQuery(attachmentQueries.byTask(task.id));
-  const sessionsQuery = useQuery(sessionQueries.byTask(task.id));
-  const latestSession = sessionsQuery.data?.[0] ?? null;
 
   const activateMutation = useActivateTask();
   const completeMutation = useCompleteTask();
@@ -110,27 +107,25 @@ export function TaskInfoPanel({ task }: { task: Task }) {
   const pinMutation = usePinTask();
   const unpinMutation = useUnpinTask();
   const startSessionMutation = useStartSession();
+  const retrySessionMutation = useRetrySession();
   const uploadMutation = useUploadAttachment();
   const deleteMutation = useDeleteAttachment(task.id);
 
-  // Notification status tracking
-  const prevStatusRef = useRef<Map<string, string>>(new Map());
+  // Notification on session status change
+  const prevSessionStatusRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!sessionsQuery.data) return;
-    for (const session of sessionsQuery.data) {
-      const prev = prevStatusRef.current.get(session.id);
-      if (prev && prev !== session.status) {
-        if (session.status === "done" || session.status === "failed") {
-          sendNotification(
-            "banto",
-            `セッション${session.status === "done" ? "完了" : "失敗"}: ${task.title}`,
-          );
-        }
+    const prev = prevSessionStatusRef.current;
+    if (prev && prev !== task.sessionStatus) {
+      if (task.sessionStatus === "done" || task.sessionStatus === "failed") {
+        sendNotification(
+          "banto",
+          `セッション${task.sessionStatus === "done" ? "完了" : "失敗"}: ${task.title}`,
+        );
       }
-      prevStatusRef.current.set(session.id, session.status);
     }
-  }, [sessionsQuery.data, task.title]);
+    prevSessionStatusRef.current = task.sessionStatus;
+  }, [task.sessionStatus, task.title]);
 
   // Paste to upload attachment
   useEffect(() => {
@@ -152,7 +147,11 @@ export function TaskInfoPanel({ task }: { task: Task }) {
     return () => document.removeEventListener("paste", handlePaste);
   }, [task.id, uploadMutation.mutate]);
 
-  const hasActiveSession = latestSession ? isActiveSession(latestSession.status) : false;
+  const hasActiveSession = isActiveSessionStatus(task.sessionStatus);
+  const canStartSession = task.status === "active" && task.sessionStatus === null;
+  const canRetry =
+    task.status === "active" && (task.sessionStatus === "done" || task.sessionStatus === "failed");
+
   const anyPending =
     activateMutation.isPending ||
     completeMutation.isPending ||
@@ -167,6 +166,20 @@ export function TaskInfoPanel({ task }: { task: Task }) {
         <div className="text-xs text-gray-400 mt-1">
           <span className="font-mono">{task.status}</span>
           {task.pinned && <span className="ml-2 text-yellow-500">pinned</span>}
+          {task.sessionStatus && (
+            <span className="ml-2">
+              <span
+                className={`inline-block w-2 h-2 rounded-full mr-1 ${
+                  hasActiveSession
+                    ? "bg-blue-500 animate-pulse"
+                    : task.sessionStatus === "done"
+                      ? "bg-green-500"
+                      : "bg-red-500"
+                }`}
+              />
+              <span className="font-mono">{task.sessionStatus}</span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -225,7 +238,7 @@ export function TaskInfoPanel({ task }: { task: Task }) {
             >
               Complete
             </button>
-            {!hasActiveSession && (
+            {canStartSession && (
               <button
                 type="button"
                 onClick={() => startSessionMutation.mutate(task.id)}
@@ -233,6 +246,16 @@ export function TaskInfoPanel({ task }: { task: Task }) {
                 className="text-xs bg-purple-600 text-white px-3 py-1 rounded disabled:opacity-50"
               >
                 Start Session
+              </button>
+            )}
+            {canRetry && (
+              <button
+                type="button"
+                onClick={() => retrySessionMutation.mutate(task.id)}
+                disabled={retrySessionMutation.isPending}
+                className="text-xs bg-purple-600 text-white px-3 py-1 rounded disabled:opacity-50"
+              >
+                Retry
               </button>
             )}
           </>
@@ -268,10 +291,13 @@ export function TaskInfoPanel({ task }: { task: Task }) {
         )}
       </div>
 
-      <div>
-        <h3 className="text-xs font-bold mb-2 text-gray-500">Agent Todo</h3>
-        <div className="text-xs text-gray-400">データなし</div>
-      </div>
+      {task.sessionError && (
+        <div className="mb-4">
+          <div className="text-xs text-red-500 bg-red-50 border border-red-200 rounded px-3 py-2">
+            {task.sessionError}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

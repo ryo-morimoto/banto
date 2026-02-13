@@ -1,14 +1,22 @@
 import { mkdirSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SessionService } from "./service.ts";
+import type { Database } from "bun:sqlite";
+import type { Task } from "../../shared/types.ts";
 import type { TaskRepository } from "../tasks/repository.ts";
 import type { ProjectRepository } from "../projects/repository.ts";
+import type { SessionLogRepository } from "../session-logs/repository.ts";
 import type { AttachmentService } from "../attachments/service.ts";
-import { runAgent } from "./agent.ts";
 import { generateSlug } from "./slugify.ts";
 import { getWorktreePath, createWorktree, removeWorktree } from "./worktree.ts";
-import { logStore } from "./log-store.ts";
+import { ptyStore } from "./pty-store.ts";
 import { logger } from "../logger.ts";
+
+interface PtyProcess {
+  proc: ReturnType<typeof Bun.spawn>;
+  terminal: Bun.Terminal;
+}
+
+const activePtys = new Map<string, PtyProcess>();
 
 function copyAttachmentsToProject(
   attachmentService: AttachmentService,
@@ -33,153 +41,210 @@ function copyAttachmentsToProject(
 }
 
 export function createRunner(
-  sessionService: SessionService,
+  db: Database,
   taskRepo: TaskRepository,
   projectRepo: ProjectRepository,
+  sessionLogRepo: SessionLogRepository,
   attachmentService?: AttachmentService,
 ) {
   return {
-    async run(sessionId: string) {
-      const session = sessionService.findById(sessionId);
-      if (!session || session.status !== "pending") return;
+    startSession(taskId: string): Task {
+      // Race-safe guard: BEGIN IMMEDIATE + null check
+      const tx = db.transaction(() => {
+        const task = taskRepo.findById(taskId);
+        if (!task) throw new Error("Task not found");
+        if (task.status !== "active")
+          throw new Error(`Cannot start session for task in ${task.status} status`);
+        if (task.sessionStatus !== null) throw new Error("Task already has an active session");
 
-      const task = taskRepo.findById(session.taskId);
-      if (!task) return;
+        return taskRepo.updateSessionStatus(taskId, "pending", {
+          sessionStartedAt: new Date().toISOString(),
+          sessionError: null,
+          worktreePath: null,
+          branch: null,
+        });
+      });
 
+      const task = tx.immediate();
+      this.spawnPty(task);
+      return task;
+    },
+
+    async spawnPty(task: Task) {
       const project = projectRepo.findById(task.projectId);
-      if (!project) return;
+      if (!project) {
+        taskRepo.updateSessionStatus(task.id, "failed", {
+          sessionError: "Project not found",
+        });
+        return;
+      }
 
-      const branch = `banto/${sessionId.slice(0, 8)}`;
-      const containerName = `banto-${sessionId.slice(0, 8)}`;
-
-      // Create isolated worktree
       const slug = await generateSlug(task.title);
-      const wtPath = getWorktreePath(project.localPath, slug, sessionId);
-      createWorktree(project.localPath, branch, wtPath);
+      const branch = `banto/${task.id.slice(0, 8)}`;
+      const wtPath = getWorktreePath(project.localPath, slug, task.id);
+
+      try {
+        createWorktree(project.localPath, branch, wtPath);
+      } catch (err) {
+        taskRepo.updateSessionStatus(task.id, "failed", {
+          sessionError: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
 
       // Copy attachments into worktree
-      const attachmentPaths = attachmentService
-        ? copyAttachmentsToProject(attachmentService, task.id, wtPath)
-        : [];
+      if (attachmentService) {
+        copyAttachmentsToProject(attachmentService, task.id, wtPath);
+      }
 
-      // Transition to provisioning
-      sessionService.markProvisioning(sessionId, containerName, wtPath);
-
-      // Run agent asynchronously
-      runAgent({
-        bantoSessionId: sessionId,
-        task,
-        project,
+      taskRepo.updateSessionStatus(task.id, "provisioning", {
+        worktreePath: wtPath,
         branch,
-        attachmentPaths,
-        cwd: wtPath,
-        onSessionId: (ccSessionId) => {
-          try {
-            sessionService.markRunning(sessionId, ccSessionId, branch);
-          } catch (err) {
-            logger.warn("Session state transition failed", {
-              sessionId,
-              transition: "running",
-              error: err instanceof Error ? err.message : String(err),
-            });
+      });
+
+      let firstData = true;
+
+      const terminal = new Bun.Terminal({
+        cols: 120,
+        rows: 40,
+        data(_term: unknown, data: Uint8Array) {
+          ptyStore.push(task.id, data);
+
+          if (firstData) {
+            firstData = false;
+            try {
+              taskRepo.updateSessionStatus(task.id, "running");
+            } catch (err) {
+              logger.warn("Failed to transition to running", {
+                taskId: task.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
         },
-      })
-        .then((result) => {
+        exit() {
+          activePtys.delete(task.id);
+        },
+      });
+
+      const prompt = [task.title, task.description].filter(Boolean).join("\n\n");
+
+      const proc = Bun.spawn(["claude", "--print", prompt], {
+        cwd: wtPath,
+        env: { ...process.env, CLAUDE_CODE_EXECUTABLE: undefined },
+        terminal,
+      });
+
+      activePtys.set(task.id, { proc, terminal });
+
+      ptyStore.setStdinWriter(task.id, (data: string) => {
+        terminal.write(data);
+      });
+
+      // Wait for process exit
+      proc.exited
+        .then((exitCode: number) => {
           try {
-            if (result.success) {
-              sessionService.markDone(sessionId);
+            if (exitCode === 0) {
+              taskRepo.updateSessionStatus(task.id, "done");
             } else {
-              sessionService.markFailed(sessionId, result.error ?? "Unknown error");
+              taskRepo.updateSessionStatus(task.id, "failed", {
+                sessionError: `Process exited with code ${exitCode}`,
+              });
             }
           } catch (err) {
-            logger.warn("Session state transition failed", {
-              sessionId,
-              transition: result.success ? "done" : "failed",
+            logger.warn("Failed to update session status on exit", {
+              taskId: task.id,
               error: err instanceof Error ? err.message : String(err),
             });
           }
+          ptyStore.notifyEnd(task.id);
         })
-        .catch((err) => {
+        .catch((err: unknown) => {
           try {
-            sessionService.markFailed(sessionId, err instanceof Error ? err.message : String(err));
+            taskRepo.updateSessionStatus(task.id, "failed", {
+              sessionError: err instanceof Error ? err.message : String(err),
+            });
           } catch (innerErr) {
             logger.error("Failed to mark session as failed", {
-              sessionId,
+              taskId: task.id,
               error: innerErr instanceof Error ? innerErr.message : String(innerErr),
             });
           }
-        })
-        .finally(() => {
-          try {
-            removeWorktree(project.localPath, wtPath);
-          } catch (err) {
-            logger.warn("Failed to clean up worktree", {
-              sessionId,
-              worktreePath: wtPath,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-          // Clear log store after a grace period so SSE clients receive remaining logs
-          setTimeout(() => logStore.clear(sessionId), 30_000);
+          ptyStore.notifyEnd(task.id);
         });
     },
-  };
-}
 
-export function createMockRunner(sessionService: SessionService) {
-  return {
-    run(sessionId: string) {
-      setTimeout(() => {
+    archiveSession(taskId: string) {
+      const task = taskRepo.findById(taskId);
+      if (!task || task.sessionStatus === null) return;
+
+      // 1. Kill PTY if alive
+      const pty = activePtys.get(taskId);
+      if (pty) {
         try {
-          sessionService.markProvisioning(
-            sessionId,
-            `banto-${sessionId.slice(0, 8)}`,
-            "/mock/worktree",
-          );
-        } catch (err) {
-          logger.warn("Mock: session state transition failed", {
-            sessionId,
-            transition: "provisioning",
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return;
-        }
-
-        setTimeout(() => {
-          try {
-            sessionService.markRunning(
-              sessionId,
-              `cc-${sessionId.slice(0, 8)}`,
-              `task/${sessionId.slice(0, 8)}`,
-            );
-          } catch (err) {
-            logger.warn("Mock: session state transition failed", {
-              sessionId,
-              transition: "running",
-              error: err instanceof Error ? err.message : String(err),
-            });
-            return;
-          }
-
+          pty.proc.kill("SIGTERM");
+          // Give a short grace period then force kill
           setTimeout(() => {
             try {
-              if (Math.random() < 0.8) {
-                sessionService.markDone(sessionId);
-              } else {
-                sessionService.markFailed(sessionId, "Mock: simulated failure");
-              }
-            } catch (err) {
-              logger.warn("Mock: session state transition failed", {
-                sessionId,
-                transition: "done/failed",
-                error: err instanceof Error ? err.message : String(err),
-              });
-              return;
-            }
+              pty.proc.kill("SIGKILL");
+            } catch {}
           }, 3000);
-        }, 2000);
-      }, 1000);
+        } catch {}
+        activePtys.delete(taskId);
+      }
+
+      // 2. Clear ptyStore
+      ptyStore.clear(taskId);
+
+      // 3. Archive + reset in transaction
+      const tx = db.transaction(() => {
+        const current = taskRepo.findById(taskId);
+        if (!current || current.sessionStatus === null) return;
+
+        sessionLogRepo.insert({
+          id: crypto.randomUUID(),
+          taskId,
+          startedAt: current.sessionStartedAt ?? new Date().toISOString(),
+          endedAt: new Date().toISOString(),
+          exitStatus: current.sessionStatus === "done" ? "done" : "failed",
+          error: current.sessionError,
+        });
+
+        taskRepo.resetSessionFields(taskId);
+      });
+      tx.immediate();
+
+      // 4. Clean up worktree
+      if (task.worktreePath) {
+        const project = projectRepo.findById(task.projectId);
+        if (project) {
+          try {
+            removeWorktree(project.localPath, task.worktreePath);
+          } catch (err) {
+            logger.warn("Failed to clean up worktree", {
+              taskId,
+              worktreePath: task.worktreePath,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+    },
+
+    retrySession(taskId: string): Task {
+      this.archiveSession(taskId);
+      return this.startSession(taskId);
+    },
+
+    resizeTerminal(taskId: string, cols: number, rows: number) {
+      const pty = activePtys.get(taskId);
+      if (!pty) throw new Error("Active PTY not found for this task");
+      pty.terminal.resize(cols, rows);
+    },
+
+    getActivePty(taskId: string): PtyProcess | undefined {
+      return activePtys.get(taskId);
     },
   };
 }
