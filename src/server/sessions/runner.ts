@@ -220,7 +220,7 @@ export function createRunner(
         const project = projectRepo.findById(task.projectId);
         if (project) {
           try {
-            removeWorktree(project.localPath, task.worktreePath);
+            removeWorktree(project.localPath, task.worktreePath, task.branch ?? undefined);
           } catch (err) {
             logger.warn("Failed to clean up worktree", {
               taskId,

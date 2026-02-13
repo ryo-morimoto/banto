@@ -104,4 +104,19 @@ describe("removeWorktree", () => {
   it("does not throw when worktree directory does not exist", () => {
     expect(() => removeWorktree(repoPath, "/tmp/nonexistent-worktree-path")).not.toThrow();
   });
+
+  it("deletes the associated branch when provided", () => {
+    const branch = "banto/rm-branch3";
+    createWorktree(repoPath, branch, wtPath);
+
+    // Branch exists before removal
+    const before = gitSync(["branch", "--list", branch], repoPath);
+    expect(new TextDecoder().decode(before.stdout)).toContain(branch);
+
+    removeWorktree(repoPath, wtPath, branch);
+
+    // Branch should be gone after removal
+    const after = gitSync(["branch", "--list", branch], repoPath);
+    expect(new TextDecoder().decode(after.stdout).trim()).toBe("");
+  });
 });

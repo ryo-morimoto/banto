@@ -7,7 +7,7 @@ export function recoverOrphanedSessions(
   taskRepo: TaskRepository,
   projectRepo: ProjectRepository,
   sessionLogRepo: SessionLogRepository,
-  removeWorktreeFn: (repoPath: string, destPath: string) => void,
+  removeWorktreeFn: (repoPath: string, destPath: string, branch?: string) => void,
 ): void {
   const orphaned = taskRepo.findWithActiveSession();
 
@@ -17,7 +17,7 @@ export function recoverOrphanedSessions(
       const project = projectRepo.findById(task.projectId);
       if (project) {
         try {
-          removeWorktreeFn(project.localPath, task.worktreePath);
+          removeWorktreeFn(project.localPath, task.worktreePath, task.branch ?? undefined);
         } catch (err) {
           logger.warn("Failed to clean up worktree during recovery", {
             taskId: task.id,
