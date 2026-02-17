@@ -1,17 +1,38 @@
 import type { TerminalAdapter } from "./terminal-adapter.ts";
 
-type GhosttyModule = typeof import("ghostty-web");
-type GhosttyTerminal = import("ghostty-web").Terminal;
+interface GhosttyFitAddon {
+  activate(terminal: unknown): void;
+  dispose(): void;
+  proposeDimensions(): { cols: number; rows: number } | undefined;
+}
+
+interface GhosttyTerminal {
+  open(element: HTMLElement): void;
+  write(data: string | Uint8Array): void;
+  onData(listener: (data: string) => void): void;
+  loadAddon(addon: GhosttyFitAddon): void;
+  resize(cols: number, rows: number): void;
+  dispose?(): void;
+}
+
+interface GhosttyModule {
+  init?: () => Promise<void>;
+  Terminal: new (options?: import("ghostty-web").ITerminalOptions) => GhosttyTerminal;
+  FitAddon: new () => GhosttyFitAddon;
+}
 
 class GhosttyTerminalAdapter implements TerminalAdapter {
   private readonly term: GhosttyTerminal;
+  private readonly fitAddon: GhosttyFitAddon;
 
-  constructor(term: GhosttyTerminal) {
+  constructor(term: GhosttyTerminal, fitAddon: GhosttyFitAddon) {
     this.term = term;
+    this.fitAddon = fitAddon;
   }
 
   open(element: HTMLElement) {
     this.term.open(element);
+    this.term.loadAddon(this.fitAddon);
   }
 
   write(data: string | Uint8Array) {
@@ -24,7 +45,7 @@ class GhosttyTerminalAdapter implements TerminalAdapter {
   }
 
   proposeDimensions() {
-    return this.term.proposeDimensions?.() ?? null;
+    return this.fitAddon.proposeDimensions() ?? null;
   }
 
   resize(cols: number, rows: number) {
@@ -32,12 +53,12 @@ class GhosttyTerminalAdapter implements TerminalAdapter {
   }
 
   dispose() {
+    this.fitAddon.dispose();
     this.term.dispose?.();
   }
 }
 
-export async function createGhosttyTerminalAdapter() {
-  const ghostty: GhosttyModule = await import("ghostty-web");
+export async function createGhosttyTerminalAdapterFromModule(ghostty: GhosttyModule) {
   if (ghostty.init) await ghostty.init();
 
   const terminal = new ghostty.Terminal({
@@ -66,5 +87,11 @@ export async function createGhosttyTerminalAdapter() {
       brightWhite: "#ffffff",
     },
   });
-  return new GhosttyTerminalAdapter(terminal);
+  const fitAddon = new ghostty.FitAddon();
+  return new GhosttyTerminalAdapter(terminal, fitAddon);
+}
+
+export async function createGhosttyTerminalAdapter() {
+  const ghostty: GhosttyModule = await import("ghostty-web");
+  return createGhosttyTerminalAdapterFromModule(ghostty);
 }

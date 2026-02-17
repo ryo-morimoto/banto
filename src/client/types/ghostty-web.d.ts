@@ -1,6 +1,16 @@
 declare module "ghostty-web" {
   export function init(): Promise<void>;
 
+  export interface ITerminalAddon {
+    activate(terminal: Terminal): void;
+    dispose(): void;
+  }
+
+  export interface ITerminalDimensions {
+    cols: number;
+    rows: number;
+  }
+
   export interface ITheme {
     foreground?: string;
     background?: string;
@@ -43,8 +53,15 @@ declare module "ghostty-web" {
     open(element: HTMLElement): void;
     write(data: string | Uint8Array): void;
     onData(listener: (data: string) => void): void;
-    proposeDimensions?(): { cols: number; rows: number } | null;
+    loadAddon(addon: ITerminalAddon): void;
     resize(cols: number, rows: number): void;
     dispose?(): void;
+  }
+
+  export class FitAddon implements ITerminalAddon {
+    activate(terminal: Terminal): void;
+    dispose(): void;
+    fit(): void;
+    proposeDimensions(): ITerminalDimensions | undefined;
   }
 }
