@@ -2,112 +2,109 @@ import { Elysia, t } from "elysia";
 import { db } from "../db.ts";
 import { createTaskRepository } from "../tasks/repository.ts";
 import { createProjectRepository } from "../projects/repository.ts";
-import { createSessionRepository } from "./repository.ts";
-import { createSessionService } from "./service.ts";
-import { createRunner, createMockRunner } from "./runner.ts";
-import { recoverStaleSessions } from "./recovery.ts";
+import { createSessionLogRepository } from "../session-logs/repository.ts";
+import { createRunner } from "./runner.ts";
+import { recoverOrphanedSessions } from "./recovery.ts";
 import { removeWorktree } from "./worktree.ts";
-import { logStore } from "./log-store.ts";
+import { ptyStore } from "./pty-store.ts";
 import { attachmentService } from "../attachments/instance.ts";
 
 const taskRepo = createTaskRepository(db);
 const projectRepo = createProjectRepository(db);
-const sessionRepo = createSessionRepository(db);
-const service = createSessionService(sessionRepo, taskRepo);
+const sessionLogRepo = createSessionLogRepository(db);
+const terminalUnsubscribers = new WeakMap<object, () => void>();
+const terminalDecoder = new TextDecoder();
 
-recoverStaleSessions(sessionRepo, taskRepo, projectRepo, removeWorktree);
+function decodeTerminalInput(message: unknown): string | null {
+  if (typeof message === "string") return message;
+  if (message instanceof Uint8Array) return terminalDecoder.decode(message);
+  if (message instanceof ArrayBuffer) return terminalDecoder.decode(new Uint8Array(message));
+  return null;
+}
 
-const runner =
-  process.env["BANTO_MOCK_RUNNER"] === "1"
-    ? createMockRunner(service)
-    : createRunner(service, taskRepo, projectRepo, attachmentService);
+// Recover orphaned sessions before accepting requests
+recoverOrphanedSessions(taskRepo, projectRepo, sessionLogRepo, removeWorktree);
 
-export const sessionRoutes = new Elysia({ prefix: "/sessions" })
-  .get("/task/:taskId", ({ params }) => service.findByTaskId(params.taskId))
-  .get("/:id", ({ params }) => {
-    const session = service.findById(params.id);
-    if (!session) throw new Error("Session not found");
-    return session;
+const runner = createRunner(db, taskRepo, projectRepo, sessionLogRepo, attachmentService);
+
+export const sessionRoutes = new Elysia()
+  .post("/tasks/:id/session/start", ({ params }) => {
+    return runner.startSession(params.id);
+  })
+  .post("/tasks/:id/session/retry", ({ params }) => {
+    return runner.retrySession(params.id);
   })
   .post(
-    "/",
-    ({ body }) => {
-      const session = service.start(body.taskId);
-      runner.run(session.id);
-      return session;
+    "/tasks/:id/terminal/resize",
+    ({ params, body }) => {
+      runner.resizeTerminal(params.id, body.cols, body.rows);
+      return { ok: true };
     },
     {
       body: t.Object({
-        taskId: t.String(),
+        cols: t.Number(),
+        rows: t.Number(),
       }),
     },
   )
-  .post(
-    "/:id/provisioning",
-    ({ params, body }) =>
-      service.markProvisioning(params.id, body.containerName, body.worktreePath),
-    {
-      body: t.Object({
-        containerName: t.String(),
-        worktreePath: t.String(),
-      }),
+  .get("/tasks/:id/session-logs", ({ params }) => {
+    return sessionLogRepo.findByTaskId(params.id);
+  })
+  .ws("/tasks/:id/terminal", {
+    open(ws) {
+      const taskId = ws.data.params.id;
+      const task = taskRepo.findById(taskId);
+
+      if (!task || task.sessionStatus === null) {
+        ws.close(4404, "No active session");
+        return;
+      }
+
+      // Send replay buffer
+      const buffer = ptyStore.getBuffer(taskId);
+      for (const chunk of buffer) {
+        ws.sendBinary(chunk);
+      }
+
+      // Subscribe to live output
+      const unsubData = ptyStore.subscribe(taskId, (data) => {
+        ws.sendBinary(data);
+      });
+
+      // Close WebSocket when session ends
+      const unsubEnd = ptyStore.onEnd(taskId, () => {
+        ws.close(1000, "Session ended");
+      });
+
+      // Store cleanup for both subscriptions
+      terminalUnsubscribers.set(ws, () => {
+        unsubData();
+        unsubEnd();
+      });
     },
-  )
-  .post(
-    "/:id/running",
-    ({ params, body }) => service.markRunning(params.id, body.ccSessionId, body.branch),
-    {
-      body: t.Object({
-        ccSessionId: t.String(),
-        branch: t.String(),
-      }),
+    message(ws, message) {
+      const taskId = ws.data.params.id;
+      const task = taskRepo.findById(taskId);
+
+      // Only forward stdin for active sessions
+      if (
+        task &&
+        task.sessionStatus !== null &&
+        task.sessionStatus !== "done" &&
+        task.sessionStatus !== "failed"
+      ) {
+        const data = decodeTerminalInput(message);
+        if (data !== null) {
+          ptyStore.writeStdin(taskId, data);
+        }
+      }
     },
-  )
-  .post("/:id/done", ({ params }) => service.markDone(params.id))
-  .post("/:id/failed", ({ params, body }) => service.markFailed(params.id, body.error), {
-    body: t.Object({
-      error: t.String(),
+    close(ws) {
+      const unsubscribe = terminalUnsubscribers.get(ws);
+      if (unsubscribe) unsubscribe();
+      terminalUnsubscribers.delete(ws);
+    },
+    params: t.Object({
+      id: t.String(),
     }),
-  })
-  .get("/:id/logs", ({ params }) => logStore.getAll(params.id))
-  .get("/:id/logs/stream", ({ params }) => {
-    const sessionId = params.id;
-    return new Response(
-      new ReadableStream({
-        start(controller) {
-          const encoder = new TextEncoder();
-
-          // Send existing logs first
-          for (const entry of logStore.getAll(sessionId)) {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify(entry)}\n\n`));
-          }
-
-          // Subscribe to new logs
-          const unsubscribe = logStore.subscribe(sessionId, (entry) => {
-            try {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(entry)}\n\n`));
-            } catch {
-              unsubscribe();
-            }
-          });
-
-          // Clean up on close
-          const checkClosed = setInterval(() => {
-            try {
-              controller.enqueue(encoder.encode(":\n\n"));
-            } catch {
-              unsubscribe();
-              clearInterval(checkClosed);
-            }
-          }, 15000);
-        },
-      }),
-      {
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-        },
-      },
-    );
   });

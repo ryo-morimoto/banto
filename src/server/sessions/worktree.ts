@@ -28,7 +28,7 @@ export function createWorktree(repoPath: string, branch: string, destPath: strin
   }
 }
 
-export function removeWorktree(repoPath: string, destPath: string): void {
+export function removeWorktree(repoPath: string, destPath: string, branch?: string): void {
   const env = cleanGitEnv();
 
   // Try git worktree remove --force first
@@ -41,6 +41,11 @@ export function removeWorktree(repoPath: string, destPath: string): void {
     // Fallback: rm + prune
     rmSync(destPath, { recursive: true, force: true });
     Bun.spawnSync(["git", "worktree", "prune"], { cwd: repoPath, env });
+  }
+
+  // Delete the associated branch so retries can re-create it
+  if (branch) {
+    Bun.spawnSync(["git", "branch", "-D", branch], { cwd: repoPath, env });
   }
 
   // Best-effort: remove parent -wt directory if empty

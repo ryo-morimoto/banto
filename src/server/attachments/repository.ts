@@ -25,15 +25,17 @@ export function createAttachmentRepository(db: Database) {
   return {
     findById(id: string): Attachment | null {
       const row = db
-        .query("SELECT * FROM attachments WHERE id = ?")
-        .get(id) as AttachmentRow | null;
+        .query<AttachmentRow, [string]>("SELECT * FROM attachments WHERE id = ?")
+        .get(id);
       return row ? toAttachment(row) : null;
     },
 
     findByTaskId(taskId: string): Attachment[] {
       const rows = db
-        .query("SELECT * FROM attachments WHERE task_id = ? ORDER BY created_at DESC")
-        .all(taskId) as AttachmentRow[];
+        .query<AttachmentRow, [string]>(
+          "SELECT * FROM attachments WHERE task_id = ? ORDER BY created_at DESC",
+        )
+        .all(taskId);
       return rows.map(toAttachment);
     },
 

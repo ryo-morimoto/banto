@@ -23,8 +23,59 @@
         '';
       };
 
+      devShells.${system}.default =
+        let
+          playwrightLibs = [
+            pkgs.alsa-lib
+            pkgs.at-spi2-atk
+            pkgs.at-spi2-core
+            pkgs.atk
+            pkgs.cairo
+            pkgs.cups
+            pkgs.dbus
+            pkgs.expat
+            pkgs.fontconfig
+            pkgs.freetype
+            pkgs.gdk-pixbuf
+            pkgs.glib
+            pkgs.gtk3
+            pkgs.libgbm
+            pkgs.libdrm
+            pkgs.nspr
+            pkgs.nss
+            pkgs.pango
+            pkgs.systemd
+            pkgs.libx11
+            pkgs.libxcomposite
+            pkgs.libxdamage
+            pkgs.libxext
+            pkgs.libxfixes
+            pkgs.libxrandr
+            pkgs.libxcb
+            pkgs.libxkbfile
+            pkgs.libxkbcommon
+          ];
+        in
+        pkgs.mkShell {
+          packages = [
+            pkgs.bun
+            pkgs.git
+          ];
+
+          shellHook = ''
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath playwrightLibs}:''${LD_LIBRARY_PATH:-}"
+            export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+            echo "Playwright native libs loaded for this shell"
+          '';
+        };
+
       nixosModules.default =
-        { config, lib, pkgs, ... }:
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
         let
           cfg = config.services.banto;
           bantoPackage = self.packages.${pkgs.system}.default;
@@ -86,7 +137,6 @@
                 RestartSec = 5;
               };
             };
-
 
           };
         };

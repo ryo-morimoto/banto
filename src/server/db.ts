@@ -15,38 +15,29 @@ export function applySchema(db: Database) {
 
   db.run(`
     CREATE TABLE IF NOT EXISTS tasks (
-      id          TEXT PRIMARY KEY,
-      project_id  TEXT NOT NULL REFERENCES projects(id),
-      title       TEXT NOT NULL,
-      description TEXT,
-      pinned      INTEGER NOT NULL DEFAULT 0,
-      status      TEXT NOT NULL DEFAULT 'backlog',
-      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      id                 TEXT PRIMARY KEY,
+      project_id         TEXT NOT NULL REFERENCES projects(id),
+      title              TEXT NOT NULL,
+      description        TEXT,
+      pinned             INTEGER NOT NULL DEFAULT 0,
+      status             TEXT NOT NULL DEFAULT 'backlog',
+      session_status     TEXT,
+      worktree_path      TEXT,
+      branch             TEXT,
+      session_started_at TEXT,
+      session_error      TEXT,
+      created_at         TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
 
   db.run(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id              TEXT PRIMARY KEY,
-      task_id         TEXT NOT NULL REFERENCES tasks(id),
-      status          TEXT NOT NULL DEFAULT 'pending',
-      container_name  TEXT,
-      cc_session_id   TEXT,
-      branch          TEXT,
-      error           TEXT,
-      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-      completed_at    TEXT
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS messages (
+    CREATE TABLE IF NOT EXISTS session_logs (
       id          TEXT PRIMARY KEY,
-      session_id  TEXT NOT NULL REFERENCES sessions(id),
-      role        TEXT NOT NULL,
-      content     TEXT NOT NULL,
-      tool_name   TEXT,
-      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+      task_id     TEXT NOT NULL REFERENCES tasks(id),
+      started_at  TEXT NOT NULL,
+      ended_at    TEXT NOT NULL,
+      exit_status TEXT NOT NULL,
+      error       TEXT
     )
   `);
 
@@ -61,13 +52,28 @@ export function applySchema(db: Database) {
     )
   `);
 
-  // Migrations for existing databases (ALTER TABLE fails if column already exists)
-  try {
-    db.run("ALTER TABLE sessions ADD COLUMN worktree_path TEXT");
-  } catch {}
-  try {
-    db.run("ALTER TABLE sessions ADD COLUMN todos TEXT");
-  } catch {}
+  // Migrations for existing databases
+  migrateFromLegacySchema(db);
+}
+
+function migrateFromLegacySchema(db: Database) {
+  // Add session columns to tasks if they don't exist
+  const sessionColumns = [
+    "session_status TEXT",
+    "worktree_path TEXT",
+    "branch TEXT",
+    "session_started_at TEXT",
+    "session_error TEXT",
+  ];
+  for (const col of sessionColumns) {
+    try {
+      db.run(`ALTER TABLE tasks ADD COLUMN ${col}`);
+    } catch {}
+  }
+
+  // Drop legacy tables if they exist
+  db.run("DROP TABLE IF EXISTS messages");
+  db.run("DROP TABLE IF EXISTS sessions");
 }
 
 function getDbPath(): string {

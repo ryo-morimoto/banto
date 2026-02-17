@@ -1,13 +1,13 @@
 import { api, unwrap } from "../api.ts";
 
-export async function listSessionsByTask(taskId: string) {
-  return unwrap(await api.api.sessions.task({ taskId }).get());
-}
-
-export async function getSession(id: string) {
-  return unwrap(await api.api.sessions({ id }).get());
-}
-
 export async function startSession(taskId: string) {
-  return unwrap(await api.api.sessions.post({ taskId }));
+  return unwrap(await api.api.tasks({ id: taskId }).session.start.post());
+}
+
+export async function retrySession(taskId: string) {
+  return unwrap(await api.api.tasks({ id: taskId }).session.retry.post());
+}
+
+export async function getSessionLogs(taskId: string) {
+  return unwrap(await api.api.tasks({ id: taskId })["session-logs"].get());
 }

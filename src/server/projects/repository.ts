@@ -23,13 +23,13 @@ export function createProjectRepository(db: Database) {
   return {
     findAll(): Project[] {
       const rows = db
-        .query("SELECT * FROM projects ORDER BY created_at DESC")
-        .all() as ProjectRow[];
+        .query<ProjectRow, []>("SELECT * FROM projects ORDER BY created_at DESC")
+        .all();
       return rows.map(toProject);
     },
 
     findById(id: string): Project | null {
-      const row = db.query("SELECT * FROM projects WHERE id = ?").get(id) as ProjectRow | null;
+      const row = db.query<ProjectRow, [string]>("SELECT * FROM projects WHERE id = ?").get(id);
       return row ? toProject(row) : null;
     },
 

@@ -1,5 +1,6 @@
 import { describe, it, expect, mock } from "bun:test";
 import { simpleSlugify, isAsciiTitle, generateSlug, _generateSlugWithClient } from "./slugify.ts";
+import type { SlugClient } from "./slugify.ts";
 
 describe("simpleSlugify", () => {
   it("converts uppercase to lowercase", () => {
@@ -72,7 +73,7 @@ describe("generateSlug", () => {
         content: [{ type: "text", text: "fix-login-bug" }],
       }),
     );
-    const client = { messages: { create: mockCreate } } as any;
+    const client: SlugClient = { messages: { create: mockCreate } };
 
     const result = await _generateSlugWithClient("ログインバグを修正", client);
     expect(result).toBe("fix-login-bug");
@@ -81,7 +82,7 @@ describe("generateSlug", () => {
 
   it("returns 'task' when API call fails for non-ASCII title", async () => {
     const mockCreate = mock(() => Promise.reject(new Error("API error")));
-    const client = { messages: { create: mockCreate } } as any;
+    const client: SlugClient = { messages: { create: mockCreate } };
 
     const result = await _generateSlugWithClient("ログインバグを修正", client);
     expect(result).toBe("task");

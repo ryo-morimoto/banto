@@ -1,5 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+export interface SlugClient {
+  messages: {
+    create(input: {
+      model: string;
+      max_tokens: number;
+      messages: Array<{ role: "user"; content: string }>;
+    }): Promise<{ content: unknown[] }>;
+  };
+}
+
 export function simpleSlugify(title: string): string {
   const slug = title
     .toLowerCase()
@@ -18,10 +28,7 @@ export function isAsciiTitle(title: string): boolean {
   return /^[a-zA-Z0-9\s\-_]+$/.test(trimmed);
 }
 
-export async function _generateSlugWithClient(
-  title: string,
-  client: Pick<Anthropic, "messages">,
-): Promise<string> {
+export async function _generateSlugWithClient(title: string, client: SlugClient): Promise<string> {
   if (isAsciiTitle(title)) {
     return simpleSlugify(title);
   }
@@ -38,9 +45,14 @@ export async function _generateSlugWithClient(
       ],
     });
 
-    const text = response.content[0];
-    if (text && "text" in text) {
-      return simpleSlugify(text.text);
+    const firstBlock = response.content[0];
+    if (
+      firstBlock &&
+      typeof firstBlock === "object" &&
+      "text" in firstBlock &&
+      typeof firstBlock.text === "string"
+    ) {
+      return simpleSlugify(firstBlock.text);
     }
     return "task";
   } catch {
