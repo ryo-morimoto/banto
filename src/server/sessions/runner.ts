@@ -127,11 +127,6 @@ export function createRunner(
                 error: err instanceof Error ? err.message : String(err),
               });
             }
-            // Send initial prompt after TUI finishes rendering
-            setTimeout(() => {
-              // Bracketed paste to preserve newlines in multiline prompts
-              terminal.write(`\x1b[200~${prompt}\x1b[201~\r`);
-            }, 1000);
           }
         },
         exit() {
@@ -141,7 +136,7 @@ export function createRunner(
 
       let proc: ReturnType<typeof Bun.spawn>;
       try {
-        proc = Bun.spawn(["claude"], {
+        proc = Bun.spawn(["claude", prompt], {
           cwd: wtPath,
           env: { ...process.env, CLAUDE_CODE_EXECUTABLE: undefined },
           terminal,
