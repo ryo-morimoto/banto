@@ -1,6 +1,11 @@
 import { describe, it, expect, mock } from "bun:test";
-import { simpleSlugify, isAsciiTitle, generateSlug, _generateSlugWithClient } from "./slugify.ts";
-import type { SlugClient } from "./slugify.ts";
+import {
+  simpleSlugify,
+  isAsciiTitle,
+  generateSlug,
+  _generateSlugWithGenerator,
+} from "./slugify.ts";
+import type { SlugGenerator } from "./slugify.ts";
 
 describe("simpleSlugify", () => {
   it("converts uppercase to lowercase", () => {
@@ -68,23 +73,17 @@ describe("generateSlug", () => {
   });
 
   it("calls Haiku for non-ASCII title and returns slug", async () => {
-    const mockCreate = mock(() =>
-      Promise.resolve({
-        content: [{ type: "text", text: "fix-login-bug" }],
-      }),
-    );
-    const client: SlugClient = { messages: { create: mockCreate } };
+    const mockGenerator: SlugGenerator = mock(() => Promise.resolve("fix-login-bug"));
 
-    const result = await _generateSlugWithClient("ログインバグを修正", client);
+    const result = await _generateSlugWithGenerator("ログインバグを修正", mockGenerator);
     expect(result).toBe("fix-login-bug");
-    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockGenerator).toHaveBeenCalledTimes(1);
   });
 
   it("returns 'task' when API call fails for non-ASCII title", async () => {
-    const mockCreate = mock(() => Promise.reject(new Error("API error")));
-    const client: SlugClient = { messages: { create: mockCreate } };
+    const mockGenerator: SlugGenerator = mock(() => Promise.reject(new Error("API error")));
 
-    const result = await _generateSlugWithClient("ログインバグを修正", client);
+    const result = await _generateSlugWithGenerator("ログインバグを修正", mockGenerator);
     expect(result).toBe("task");
   });
 });
