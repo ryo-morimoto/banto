@@ -13,6 +13,7 @@ export const apiApp = new Elysia({ prefix: "/api" })
     return { requestId, requestStartMs: performance.now() };
   })
   .onAfterResponse(({ request, requestId, requestStartMs, set }) => {
+    if (!request.url) return;
     const url = new URL(request.url);
     logger.info(`${request.method} ${url.pathname} ${set.status ?? 200}`, {
       "request.id": requestId,
@@ -35,7 +36,8 @@ export const apiApp = new Elysia({ prefix: "/api" })
     const status = isConflict ? 409 : isNotFound ? 404 : isValidation ? 422 : 500;
     const level = status >= 500 ? "error" : "warn";
 
-    logger[level](`${request.method} ${new URL(request.url).pathname} ${status}`, {
+    const pathname = request.url ? new URL(request.url).pathname : "unknown";
+    logger[level](`${request.method} ${pathname} ${status}`, {
       requestId,
       code,
       error: errMsg,
