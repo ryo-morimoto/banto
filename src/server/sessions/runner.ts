@@ -138,7 +138,12 @@ export function createRunner(
       try {
         proc = Bun.spawn(["claude", prompt], {
           cwd: wtPath,
-          env: { ...process.env, CLAUDE_CODE_EXECUTABLE: undefined },
+          env: {
+            ...process.env,
+            CLAUDE_CODE_EXECUTABLE: undefined,
+            TERM: "xterm-256color",
+            COLORTERM: "truecolor",
+          },
           terminal,
         });
       } catch (err) {
