@@ -1,4 +1,5 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { logger } from "../logger.ts";
 
 export function simpleSlugify(title: string): string {
   const slug = title
@@ -21,6 +22,7 @@ export function isAsciiTitle(title: string): boolean {
 export type SlugGenerator = (prompt: string) => Promise<string>;
 
 async function queryHaiku(prompt: string): Promise<string> {
+  const end = logger.startTimer();
   let result = "";
   for await (const message of query({
     prompt,
@@ -32,6 +34,21 @@ async function queryHaiku(prompt: string): Promise<string> {
   })) {
     if (message.type === "result" && message.subtype === "success") {
       result = message.result;
+      const llmContext: Record<string, unknown> = {
+        "gen_ai.operation.name": "slugify",
+        "gen_ai.request.model": "haiku",
+      };
+      if (message.total_cost_usd != null) {
+        llmContext["gen_ai.estimated_cost_usd"] = message.total_cost_usd;
+      }
+      if (message.usage) {
+        const usage = message.usage as Record<string, number>;
+        if (usage.input_tokens != null)
+          llmContext["gen_ai.usage.input_tokens"] = usage.input_tokens;
+        if (usage.output_tokens != null)
+          llmContext["gen_ai.usage.output_tokens"] = usage.output_tokens;
+      }
+      end("info", "Slug generation completed", llmContext);
     }
   }
   return result;

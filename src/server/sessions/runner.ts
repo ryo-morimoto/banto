@@ -71,6 +71,7 @@ export function createRunner(
     },
 
     async spawnPty(task: Task) {
+      const endSessionTimer = logger.startTimer();
       const project = projectRepo.findById(task.projectId);
       if (!project) {
         taskRepo.updateSessionStatus(task.id, "failed", {
@@ -147,9 +148,17 @@ export function createRunner(
           try {
             if (exitCode === 0) {
               taskRepo.updateSessionStatus(task.id, "done");
+              endSessionTimer("info", "Session completed", {
+                taskId: task.id,
+                exitCode,
+              });
             } else {
               taskRepo.updateSessionStatus(task.id, "failed", {
                 sessionError: `Process exited with code ${exitCode}`,
+              });
+              endSessionTimer("warn", "Session failed", {
+                taskId: task.id,
+                exitCode,
               });
             }
           } catch (err) {
@@ -171,6 +180,10 @@ export function createRunner(
               error: innerErr instanceof Error ? innerErr.message : String(innerErr),
             });
           }
+          endSessionTimer("error", "Session crashed", {
+            taskId: task.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
           ptyStore.notifyEnd(task.id);
         });
     },

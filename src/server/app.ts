@@ -10,7 +10,17 @@ export const apiApp = new Elysia({ prefix: "/api" })
   .derive(({ set }) => {
     const requestId = crypto.randomUUID();
     set.headers["x-request-id"] = requestId;
-    return { requestId };
+    return { requestId, requestStartMs: performance.now() };
+  })
+  .onAfterResponse(({ request, requestId, requestStartMs, set }) => {
+    const url = new URL(request.url);
+    logger.info(`${request.method} ${url.pathname} ${set.status ?? 200}`, {
+      "request.id": requestId,
+      "http.request.method": request.method,
+      "url.path": url.pathname,
+      "http.response.status_code": set.status ?? 200,
+      "http.server.request.duration": performance.now() - requestStartMs,
+    });
   })
   .onError(({ error, code, request, requestId, set }) => {
     const errMsg = error instanceof Error ? error.message : String(error);
