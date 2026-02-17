@@ -66,7 +66,12 @@ export function createRunner(
       });
 
       const task = tx.immediate();
-      this.spawnPty(task);
+      this.spawnPty(task).catch((err) => {
+        logger.error("Unhandled error in spawnPty", {
+          taskId: task.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
       return task;
     },
 
@@ -130,11 +135,19 @@ export function createRunner(
 
       const prompt = [task.title, task.description].filter(Boolean).join("\n\n");
 
-      const proc = Bun.spawn(["claude", "--print", prompt], {
-        cwd: wtPath,
-        env: { ...process.env, CLAUDE_CODE_EXECUTABLE: undefined },
-        terminal,
-      });
+      let proc: ReturnType<typeof Bun.spawn>;
+      try {
+        proc = Bun.spawn(["claude", "--print", prompt], {
+          cwd: wtPath,
+          env: { ...process.env, CLAUDE_CODE_EXECUTABLE: undefined },
+          terminal,
+        });
+      } catch (err) {
+        taskRepo.updateSessionStatus(task.id, "failed", {
+          sessionError: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
 
       activePtys.set(task.id, { proc, terminal });
 

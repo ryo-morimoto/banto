@@ -131,6 +131,7 @@
                 ExecStart = pkgs.writeShellScript "banto-start" ''
                   cd /var/lib/banto/app
                   export NODE_ENV=production
+                  export PATH="/etc/profiles/per-user/ryo-morimoto/bin:$PATH"
                   exec /var/lib/banto/app/server
                 '';
 
