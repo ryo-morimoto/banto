@@ -108,6 +108,7 @@ export function createRunner(
         branch,
       });
 
+      const prompt = [task.title, task.description].filter(Boolean).join("\n\n");
       let firstData = true;
 
       const terminal = new Bun.Terminal({
@@ -126,6 +127,11 @@ export function createRunner(
                 error: err instanceof Error ? err.message : String(err),
               });
             }
+            // Send initial prompt after TUI finishes rendering
+            setTimeout(() => {
+              // Bracketed paste to preserve newlines in multiline prompts
+              terminal.write(`\x1b[200~${prompt}\x1b[201~\r`);
+            }, 1000);
           }
         },
         exit() {
@@ -133,11 +139,9 @@ export function createRunner(
         },
       });
 
-      const prompt = [task.title, task.description].filter(Boolean).join("\n\n");
-
       let proc: ReturnType<typeof Bun.spawn>;
       try {
-        proc = Bun.spawn(["claude", "--print", prompt], {
+        proc = Bun.spawn(["claude"], {
           cwd: wtPath,
           env: { ...process.env, CLAUDE_CODE_EXECUTABLE: undefined },
           terminal,
