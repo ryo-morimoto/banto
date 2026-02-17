@@ -6,6 +6,11 @@ import { sessionRoutes } from "./sessions/routes.ts";
 import { attachmentRoutes } from "./attachments/routes.ts";
 import { errorRoutes } from "./errors/routes.ts";
 
+export function safePathname(url: string | undefined | null): string | null {
+  if (!url) return null;
+  return new URL(url).pathname;
+}
+
 export const apiApp = new Elysia({ prefix: "/api" })
   .derive(({ set }) => {
     const requestId = crypto.randomUUID();
@@ -13,12 +18,12 @@ export const apiApp = new Elysia({ prefix: "/api" })
     return { requestId, requestStartMs: performance.now() };
   })
   .onAfterResponse(({ request, requestId, requestStartMs, set }) => {
-    if (!request.url) return;
-    const url = new URL(request.url);
-    logger.info(`${request.method} ${url.pathname} ${set.status ?? 200}`, {
+    const pathname = safePathname(request.url);
+    if (!pathname) return;
+    logger.info(`${request.method} ${pathname} ${set.status ?? 200}`, {
       "request.id": requestId,
       "http.request.method": request.method,
-      "url.path": url.pathname,
+      "url.path": pathname,
       "http.response.status_code": set.status ?? 200,
       "http.server.request.duration": performance.now() - requestStartMs,
     });
@@ -36,8 +41,7 @@ export const apiApp = new Elysia({ prefix: "/api" })
     const status = isConflict ? 409 : isNotFound ? 404 : isValidation ? 422 : 500;
     const level = status >= 500 ? "error" : "warn";
 
-    const pathname = request.url ? new URL(request.url).pathname : "unknown";
-    logger[level](`${request.method} ${pathname} ${status}`, {
+    logger[level](`${request.method} ${safePathname(request.url) ?? "unknown"} ${status}`, {
       requestId,
       code,
       error: errMsg,
