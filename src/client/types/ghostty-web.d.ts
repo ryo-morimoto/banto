@@ -1,4 +1,4 @@
-declare module "@nicolo-ribaudo/ghostty-web" {
+declare module "ghostty-web" {
   export function init(): Promise<void>;
 
   export class Terminal {

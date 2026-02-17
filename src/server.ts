@@ -5,12 +5,13 @@ import { logger } from "./server/logger.ts";
 
 const app = new Elysia()
   .use(apiApp)
-  .use(await staticPlugin({ prefix: "/" }))
-  .get("*", ({ path }) => {
+  .use(await staticPlugin({ prefix: "/", alwaysStatic: true }))
+  .get("*", async ({ path, request }) => {
     if (path.startsWith("/api")) {
       return new Response(null, { status: 404 });
     }
-    return Bun.file("public/index.html");
+
+    return fetch(new URL("/index.html", request.url));
   })
   .listen({ hostname: "0.0.0.0", port: Number(process.env.PORT || 3000) });
 

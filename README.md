@@ -33,6 +33,8 @@ BANTO_MOCK_RUNNER=1 bun run dev
 
 ```bash
 bun test
+bun run test:ime:fast
+bun run test:ime:full
 ```
 
 ## Lint / Format / Typecheck
