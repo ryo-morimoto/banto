@@ -106,6 +106,7 @@
 
               path = [
                 pkgs.bun
+                pkgs.git
                 pkgs.rsync
               ];
 
