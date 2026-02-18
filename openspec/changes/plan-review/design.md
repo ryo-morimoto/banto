@@ -2,9 +2,20 @@
 
 ## Context
 
-banto sessions spawn `claude` CLI in a git worktree. When Claude Code enters plan mode, it creates a `.md` file in a plans directory. Currently there is no way to comfortably review these plans — they are only visible as terminal output.
+banto sessions spawn `claude` CLI in a git worktree. When Claude Code enters plan mode, it writes a plan file. Currently there is no way to comfortably review these plans — they are only visible as terminal output.
 
 Goal: GitHub-like review UX where users can read the plan, select lines, leave inline comments, and submit structured feedback back to Claude.
+
+## Prerequisite: Worktree lifecycle = Task lifecycle
+
+Current implementation creates/destroys worktrees per session (`archiveSession` → `removeWorktree`). This is wrong. A task has exactly one worktree throughout its lifetime:
+
+- **Task created → first session start**: worktree is created (if not exists)
+- **Session archived**: worktree survives. Only session state is reset.
+- **New session on same task**: reuses existing worktree as-is
+- **Task completed/deleted**: worktree is removed
+
+This change is a prerequisite. The plan feature depends on it.
 
 ## Architecture Overview
 
@@ -14,7 +25,7 @@ Goal: GitHub-like review UX where users can read the plan, select lines, leave i
 │  spawn claude --settings '{"plansDirectory":"..."}' prompt      │
 │                                                                 │
 │  PlanWatcher (fs.watch)                                         │
-│    detect .md create/change → notify client via polling         │
+│    detect plan file create/change → notify client via polling   │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -29,6 +40,12 @@ Goal: GitHub-like review UX where users can read the plan, select lines, leave i
 ## 1. Plan Detection
 
 ### Mechanism: `--settings` CLI flag + `fs.watch`
+
+A task has at most one plan. The plan file lives at a fixed path in the worktree:
+
+```
+{wtPath}/.banto/plans/plan.md
+```
 
 When spawning the `claude` process, inject `plansDirectory` via CLI argument:
 
@@ -47,13 +64,12 @@ Bun.spawn([
 });
 ```
 
-Then watch the directory for change notifications:
+Then watch the directory for the plan file:
 
 ```ts
-// plans/watcher.ts
+// plan/watcher.ts
 fs.watch(plansDir, (event, filename) => {
-  if (filename?.endsWith(".md")) {
-    // No DB write — just track that a plan exists for this task
+  if (filename === "plan.md") {
     planRegistry.set(taskId, { plansDir, updatedAt: Date.now() });
   }
 });
@@ -71,43 +87,45 @@ fs.watch(plansDir, (event, filename) => {
 
 ### Watcher lifecycle
 
-- **Start**: When `spawnPty` creates the worktree, start watching `{wtPath}/.banto/plans/`
+- **Start**: When `spawnPty` starts a session, start watching `{wtPath}/.banto/plans/`
 - **Stop**: When session ends (process exit) or `archiveSession` is called
-- **Debounce**: Claude edits plans incrementally — debounce file change events (500ms)
+- **Debounce**: Claude edits the plan incrementally — debounce file change events (500ms)
 
 ## 2. Plan Storage: Disk only (no DB)
 
-Plans are transient artifacts — they exist to facilitate communication between Claude and the user during a session. Once the session ends and the worktree is archived, the plan has served its purpose.
+A plan is a single file that lives in the task's worktree. Since the worktree persists for the task's entire lifetime, the plan naturally persists across sessions.
 
-- **During session**: Plan files live in `{wtPath}/.banto/plans/`. API reads directly from disk.
-- **After session archive**: Worktree is deleted, plans are gone. 404 from API.
+- **No session running**: Plan file may already exist from a previous session. API reads it from disk.
+- **During session**: Claude may create or overwrite the plan file. Watcher detects changes.
+- **Task deleted**: Worktree is removed, plan is gone.
 - **No DB schema, no migration needed.**
 
 ### In-memory registry
 
-The watcher maintains a lightweight in-memory map so the API knows which tasks have plans and where to find them:
+The watcher maintains a lightweight in-memory map so the API knows which tasks have a plan and where to find it:
 
 ```ts
 // Map<taskId, { plansDir: string, updatedAt: number }>
 const planRegistry = new Map();
 ```
 
-This is rebuilt on server restart by checking active sessions' worktrees.
+This is rebuilt on server restart by scanning worktrees for existing plan files.
 
 ## 3. API
 
-### REST endpoints
+### REST endpoint
 
 ```
-GET  /api/tasks/:taskId/plans              → { filename, updatedAt }[]
-GET  /api/tasks/:taskId/plans/:filename    → { filename, content, updatedAt }
+GET  /api/tasks/:taskId/plan    → { content, updatedAt }
 ```
 
-Both endpoints read directly from disk. If the worktree is gone, return 404.
+Single endpoint. Reads `{wtPath}/.banto/plans/plan.md` from disk. Returns 404 if the file does not exist or the task has no worktree.
+
+No filename parameter — a task has exactly one plan at a fixed path.
 
 ### Polling
 
-Client polls `GET /api/tasks/:taskId/plans` while session is active (2-3s interval). Sufficient because plan edits are infrequent.
+Client polls `GET /api/tasks/:taskId/plan` while session is active (2-3s interval). Sufficient because plan edits are infrequent.
 
 Future optimization: dedicated WebSocket channel for plan events.
 
@@ -126,15 +144,15 @@ Future optimization: dedicated WebSocket channel for plan events.
 └──────────────┴────────────────────────────────────────────┘
 ```
 
-- `Plan` tab appears when a plan is detected
+- `Plan` tab appears when plan file exists (either from current or previous session)
 - `●` indicator when plan has unread updates
-- Auto-switch to Plan tab on first detection
+- Auto-switch to Plan tab on first detection during active session
 
 ### PlanReviewView: GitHub-style source review
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│  plan-file.md                          Updated 3s ago  │
+│  plan.md                               Updated 3s ago  │
 ├────┬───────────────────────────────────────────────────┤
 │    │                                                   │
 │  1 │ # Authentication Refactoring Plan                 │
@@ -233,7 +251,8 @@ Review comments are ephemeral — they exist only in React state during the revi
 
 - **Plan updated while reviewing**: Re-render source, preserve pending comments if line ranges still valid. Show "Plan updated — some comments may be outdated" warning if line count changed significantly.
 - **Session ends while reviewing**: Action bar changes to "Session ended" — no approve/request changes. Comments are discarded.
-- **Multiple plan files**: Show the most recently updated one. Rare case — Claude typically uses one plan per session.
+- **No session but plan exists**: Plan tab is visible and readable (from previous session). Action bar is hidden since there is no active session to send feedback to.
+- **New session overwrites plan**: Claude may overwrite the plan file in a new session. Treated the same as a plan update.
 
 ## 5. Implementation scope
 
@@ -241,18 +260,19 @@ Review comments are ephemeral — they exist only in React state during the revi
 
 ```
 src/server/
-  plans/
+  plan/
     watcher.ts       -- fs.watch wrapper with debounce + in-memory registry
-    routes.ts        -- GET /api/tasks/:taskId/plans (reads from disk)
+    routes.ts        -- GET /api/tasks/:taskId/plan (reads from disk)
   sessions/
     runner.ts        -- add --settings flag, start/stop watcher
+    worktree.ts      -- decouple worktree lifecycle from session (prerequisite)
 ```
 
 ### Client
 
 ```
 src/client/
-  plans/
+  plan/
     PlanReviewView.tsx       -- main review container
     PlanSourceView.tsx       -- line-numbered source display
     ReviewCommentForm.tsx    -- inline comment input
@@ -275,9 +295,10 @@ No new external dependencies required:
 | Decision | Rationale |
 |----------|-----------|
 | Show markdown source (not rendered) | Line-level addressing requires stable line numbers. Rendered HTML has no 1:1 line mapping. |
-| Disk only, no DB | Plans are transient session artifacts. No value in persisting past worktree deletion. |
+| Disk only, no DB | Plan is a file in the worktree. Worktree persists with the task — no separate persistence needed. |
+| Worktree lifecycle = task lifecycle | Plan must survive across sessions. Worktree is the natural home for all task artifacts. |
+| Singular plan per task | A task has one plan at a fixed path. No list/filename needed. Eliminates path traversal concerns. |
 | REST polling (not WebSocket) | Plan changes are infrequent. Polling every 2-3s is simple and sufficient. |
 | Ephemeral comments (not persisted) | Comments are feedback to Claude, not a permanent record. The plan itself is the artifact. |
 | `--settings` inline JSON | Cleanest injection method. No filesystem side effects. |
 | `.banto/plans/` directory | Clear ownership. Avoids `.claude/` config collision. |
-| Single plan per task | Matches Claude Code behavior (overwrites within session). Simplifies UI. |
