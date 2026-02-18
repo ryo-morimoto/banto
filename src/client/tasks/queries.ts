@@ -4,6 +4,7 @@ import {
   listBacklogTasks,
   listPinnedTasks,
   getTask,
+  getTaskArtifacts,
   createTask,
   activateTask,
   completeTask,
@@ -11,6 +12,8 @@ import {
   pinTask,
   unpinTask,
   updateTaskDescription,
+  linkChange,
+  unlinkChange,
 } from "./api.ts";
 
 export const taskQueries = {
@@ -39,6 +42,11 @@ export const taskQueries = {
       queryKey: [...taskQueries.all(), "detail", id] as const,
       queryFn: () => getTask(id),
       placeholderData: keepPreviousData,
+    }),
+  artifacts: (id: string) =>
+    queryOptions({
+      queryKey: [...taskQueries.all(), "artifacts", id] as const,
+      queryFn: () => getTaskArtifacts(id),
     }),
 };
 
@@ -107,6 +115,26 @@ export function useUpdateDescription() {
   return useMutation({
     mutationFn: ({ id, description }: { id: string; description: string }) =>
       updateTaskDescription(id, description),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+    },
+  });
+}
+
+export function useLinkChange() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, changeId }: { id: string; changeId: string }) => linkChange(id, changeId),
+    onSettled: () => {
+      return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
+    },
+  });
+}
+
+export function useUnlinkChange() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => unlinkChange(id),
     onSettled: () => {
       return queryClient.invalidateQueries({ queryKey: taskQueries.all() });
     },

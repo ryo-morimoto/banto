@@ -2,6 +2,7 @@ import { Elysia, t } from "elysia";
 import { db } from "../db.ts";
 import { createTaskRepository } from "./repository.ts";
 import { createTaskService } from "./service.ts";
+import { readArtifacts } from "./artifacts.ts";
 
 const repo = createTaskRepository(db);
 const service = createTaskService(repo);
@@ -46,4 +47,11 @@ export const taskRoutes = new Elysia({ prefix: "/tasks" })
       }),
     },
   )
-  .post("/:id/unlink-change", ({ params }) => service.unlinkChange(params.id));
+  .post("/:id/unlink-change", ({ params }) => service.unlinkChange(params.id))
+  .get("/:id/artifacts", async ({ params }) => {
+    const task = repo.findById(params.id);
+    if (!task) throw new Error("Task not found");
+    if (!task.changeId || !task.worktreePath)
+      return { proposal: null, design: null, tasks: null };
+    return readArtifacts(task.worktreePath, task.changeId);
+  });

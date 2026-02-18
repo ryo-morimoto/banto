@@ -55,3 +55,7 @@ export async function linkChange(id: string, changeId: string) {
 export async function unlinkChange(id: string) {
   return unwrap(await api.api.tasks({ id })["unlink-change"].post());
 }
+
+export async function getTaskArtifacts(id: string) {
+  return unwrap(await api.api.tasks({ id }).artifacts.get());
+}
