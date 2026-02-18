@@ -28,6 +28,7 @@ export interface Task {
   branch: string | null;
   sessionStartedAt: string | null;
   sessionError: string | null;
+  changeId: string | null;
   createdAt: string;
 }
 

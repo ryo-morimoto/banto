@@ -36,4 +36,14 @@ export const taskRoutes = new Elysia({ prefix: "/tasks" })
         description: t.String(),
       }),
     },
-  );
+  )
+  .post(
+    "/:id/link-change",
+    ({ params, body }) => service.linkChange(params.id, body.changeId),
+    {
+      body: t.Object({
+        changeId: t.String(),
+      }),
+    },
+  )
+  .post("/:id/unlink-change", ({ params }) => service.unlinkChange(params.id));

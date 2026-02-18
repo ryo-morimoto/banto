@@ -13,6 +13,7 @@ interface TaskRow {
   branch: string | null;
   session_started_at: string | null;
   session_error: string | null;
+  change_id: string | null;
   created_at: string;
 }
 
@@ -29,6 +30,7 @@ function toTask(row: TaskRow): Task {
     branch: row.branch,
     sessionStartedAt: row.session_started_at,
     sessionError: row.session_error,
+    changeId: row.change_id,
     createdAt: row.created_at,
   };
 }
@@ -101,6 +103,11 @@ export function createTaskRepository(db: Database) {
 
     updateDescription(id: string, description: string): Task {
       db.query("UPDATE tasks SET description = ? WHERE id = ?").run(description, id);
+      return this.findById(id)!;
+    },
+
+    updateChangeId(id: string, changeId: string | null): Task {
+      db.query("UPDATE tasks SET change_id = ? WHERE id = ?").run(changeId, id);
       return this.findById(id)!;
     },
 

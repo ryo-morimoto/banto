@@ -63,6 +63,18 @@ export function createTaskService(repo: TaskRepository) {
       if (!task) throw new Error("Task not found");
       return repo.updateDescription(id, description);
     },
+
+    linkChange(id: string, changeId: string) {
+      const task = repo.findById(id);
+      if (!task) throw new Error("Task not found");
+      return repo.updateChangeId(id, changeId);
+    },
+
+    unlinkChange(id: string) {
+      const task = repo.findById(id);
+      if (!task) throw new Error("Task not found");
+      return repo.updateChangeId(id, null);
+    },
   };
 }
 

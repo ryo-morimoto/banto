@@ -47,3 +47,11 @@ export async function unpinTask(id: string) {
 export async function updateTaskDescription(id: string, description: string) {
   return unwrap(await api.api.tasks({ id }).description.patch({ description }));
 }
+
+export async function linkChange(id: string, changeId: string) {
+  return unwrap(await api.api.tasks({ id })["link-change"].post({ changeId }));
+}
+
+export async function unlinkChange(id: string) {
+  return unwrap(await api.api.tasks({ id })["unlink-change"].post());
+}

@@ -148,4 +148,31 @@ describe("TaskService", () => {
       expect(updated.description).toBe("Use offset-based pagination");
     });
   });
+
+  describe("linkChange / unlinkChange", () => {
+    it("links a change to a task", () => {
+      const task = service.create({ projectId: "proj-1", title: "Add resize" });
+      const linked = service.linkChange(task.id, "pty-resize-fix");
+
+      expect(linked.changeId).toBe("pty-resize-fix");
+    });
+
+    it("unlinks a change from a task", () => {
+      const task = service.create({ projectId: "proj-1", title: "Add resize" });
+      service.linkChange(task.id, "pty-resize-fix");
+      const unlinked = service.unlinkChange(task.id);
+
+      expect(unlinked.changeId).toBeNull();
+    });
+
+    it("throws when task not found", () => {
+      expect(() => service.linkChange("nonexistent", "some-change")).toThrow("Task not found");
+    });
+
+    it("newly created task has no changeId", () => {
+      const task = service.create({ projectId: "proj-1", title: "New task" });
+
+      expect(task.changeId).toBeNull();
+    });
+  });
 });

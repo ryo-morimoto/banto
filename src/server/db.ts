@@ -26,6 +26,7 @@ export function applySchema(db: Database) {
       branch             TEXT,
       session_started_at TEXT,
       session_error      TEXT,
+      change_id          TEXT,
       created_at         TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
@@ -70,6 +71,11 @@ function migrateFromLegacySchema(db: Database) {
       db.run(`ALTER TABLE tasks ADD COLUMN ${col}`);
     } catch {}
   }
+
+  // Add change_id column if it doesn't exist
+  try {
+    db.run("ALTER TABLE tasks ADD COLUMN change_id TEXT");
+  } catch {}
 
   // Drop legacy tables if they exist
   db.run("DROP TABLE IF EXISTS messages");
