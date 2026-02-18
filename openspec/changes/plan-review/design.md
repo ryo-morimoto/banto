@@ -14,8 +14,7 @@ Goal: GitHub-like review UX where users can read the plan, select lines, leave i
 │  spawn claude --settings '{"plansDirectory":"..."}' prompt      │
 │                                                                 │
 │  PlanWatcher (fs.watch)                                         │
-│    detect .md create/change → read content → save to DB         │
-│    → notify client via polling                                  │
+│    detect .md create/change → notify client via polling         │
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
@@ -48,14 +47,14 @@ Bun.spawn([
 });
 ```
 
-Then watch the directory:
+Then watch the directory for change notifications:
 
 ```ts
 // plans/watcher.ts
 fs.watch(plansDir, (event, filename) => {
   if (filename?.endsWith(".md")) {
-    const content = readFileSync(join(plansDir, filename), "utf-8");
-    planRepo.upsert(taskId, filename, content);
+    // No DB write — just track that a plan exists for this task
+    planRegistry.set(taskId, { plansDir, updatedAt: Date.now() });
   }
 });
 ```
@@ -76,39 +75,35 @@ fs.watch(plansDir, (event, filename) => {
 - **Stop**: When session ends (process exit) or `archiveSession` is called
 - **Debounce**: Claude edits plans incrementally — debounce file change events (500ms)
 
-## 2. Plan Storage
+## 2. Plan Storage: Disk only (no DB)
 
-### DB Schema
+Plans are transient artifacts — they exist to facilitate communication between Claude and the user during a session. Once the session ends and the worktree is archived, the plan has served its purpose.
 
-```sql
-CREATE TABLE plans (
-  id TEXT PRIMARY KEY,
-  task_id TEXT NOT NULL REFERENCES tasks(id),
-  filename TEXT NOT NULL,
-  content TEXT NOT NULL,
-  detected_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
+- **During session**: Plan files live in `{wtPath}/.banto/plans/`. API reads directly from disk.
+- **After session archive**: Worktree is deleted, plans are gone. 404 from API.
+- **No DB schema, no migration needed.**
 
-CREATE INDEX idx_plans_task_id ON plans(task_id);
+### In-memory registry
+
+The watcher maintains a lightweight in-memory map so the API knows which tasks have plans and where to find them:
+
+```ts
+// Map<taskId, { plansDir: string, updatedAt: number }>
+const planRegistry = new Map();
 ```
 
-- One plan per task at a time (Claude overwrites the same file within a session)
-- `content` is the full markdown text — small enough for TEXT column
-- On file change: `UPSERT` by (task_id, filename)
-
-### Persistence across session archive
-
-When `archiveSession` deletes the worktree, plans remain in the DB. Users can review past plans from the task detail view.
+This is rebuilt on server restart by checking active sessions' worktrees.
 
 ## 3. API
 
 ### REST endpoints
 
 ```
-GET  /api/tasks/:taskId/plans          → Plan[]
-GET  /api/tasks/:taskId/plans/:planId  → Plan (with content)
+GET  /api/tasks/:taskId/plans              → { filename, updatedAt }[]
+GET  /api/tasks/:taskId/plans/:filename    → { filename, content, updatedAt }
 ```
+
+Both endpoints read directly from disk. If the worktree is gone, return 404.
 
 ### Polling
 
@@ -232,12 +227,12 @@ interface ReviewComment {
 // On submit: formatted and sent to stdin, then cleared
 ```
 
-Review comments are ephemeral — they exist only in React state during the review. Once submitted, they are formatted into text and sent to the terminal. No need to persist comments in the DB (the plan itself gets updated by Claude in response).
+Review comments are ephemeral — they exist only in React state during the review. Once submitted, they are formatted into text and sent to the terminal. No persistence needed.
 
 ### Edge cases
 
 - **Plan updated while reviewing**: Re-render source, preserve pending comments if line ranges still valid. Show "Plan updated — some comments may be outdated" warning if line count changed significantly.
-- **Session ends while reviewing**: Action bar changes to "Session ended" — no approve/request changes. Comments are discarded (plan is already in DB for future reference).
+- **Session ends while reviewing**: Action bar changes to "Session ended" — no approve/request changes. Comments are discarded.
 - **Multiple plan files**: Show the most recently updated one. Rare case — Claude typically uses one plan per session.
 
 ## 5. Implementation scope
@@ -247,12 +242,10 @@ Review comments are ephemeral — they exist only in React state during the revi
 ```
 src/server/
   plans/
-    repository.ts    -- plans table CRUD (upsert, findByTaskId)
-    watcher.ts       -- fs.watch wrapper with debounce
-    routes.ts        -- GET /api/tasks/:taskId/plans
+    watcher.ts       -- fs.watch wrapper with debounce + in-memory registry
+    routes.ts        -- GET /api/tasks/:taskId/plans (reads from disk)
   sessions/
     runner.ts        -- add --settings flag, start/stop watcher
-  db.ts              -- add plans table migration
 ```
 
 ### Client
@@ -282,6 +275,7 @@ No new external dependencies required:
 | Decision | Rationale |
 |----------|-----------|
 | Show markdown source (not rendered) | Line-level addressing requires stable line numbers. Rendered HTML has no 1:1 line mapping. |
+| Disk only, no DB | Plans are transient session artifacts. No value in persisting past worktree deletion. |
 | REST polling (not WebSocket) | Plan changes are infrequent. Polling every 2-3s is simple and sufficient. |
 | Ephemeral comments (not persisted) | Comments are feedback to Claude, not a permanent record. The plan itself is the artifact. |
 | `--settings` inline JSON | Cleanest injection method. No filesystem side effects. |
