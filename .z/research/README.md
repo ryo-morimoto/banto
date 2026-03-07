@@ -34,6 +34,8 @@
 | [agent-control-methods.md](./agent-control-methods.md) | 10 agent control/integration methods beyond PTY/tmux: wrapper process, filesystem IPC, D-Bus/systemd, WebSocket bridge, container isolation, LSP-like protocol, shared memory, agent-as-library, GNU Screen, K8s/Nomad. Assessment matrix for banto | 2026-03-07 |
 | [learnings-cross-cutting.md](./learnings-cross-cutting.md) | 18 competitor research files cross-cutting synthesis. What users want, technical design, UX patterns, business lessons. Confidence-rated by source count | 2026-03-07 |
 | [TODO.md](./TODO.md) | 競合 12 ツール/サービスのディープリサーチ TODO | 2026-03-07 |
+| [user-workflows-multi-agent.md](./user-workflows-multi-agent.md) | Real-world multi-agent coding workflows ethnographic research. Pain points, organic behaviors, surprises from HN/blogs/data. 25+ sources, 10 pain point themes, direct quotes | 2026-03-07 |
+| [ui-ux-design-patterns.md](./ui-ux-design-patterns.md) | 12 AI coding agent dashboards UI/UX comparative analysis. Layout archetypes, information hierarchy, one-glance patterns, mobile support, user feedback, ASCII wireframes | 2026-03-07 |
 | [TEMPLATE.md](./TEMPLATE.md) | Canonical structure template for competitor deep-research files | 2026-03-07 |
 
 ## Decisions
