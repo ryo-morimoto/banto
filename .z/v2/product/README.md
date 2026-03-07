@@ -8,8 +8,8 @@
 
 | ファイル | 内容 | 状態 |
 |---------|------|------|
-| `user-stories.md` | コアワークフロー別ユーザーストーリー（jot / throw / watch）+ 横断的関心事 | 完了 |
+| `user-stories.md` | 行動ベースユーザーストーリー（7 カテゴリ、37 ストーリー） | 完了 |
 | `screen-inventory.md` | 全 8 画面/ビュー、表示要素、画面間遷移図 | 完了 |
-| `interaction-flows.md` | 8 つの主要シナリオのステップバイステップフロー | 完了 |
+| `interaction-flows.md` | 11 の主要シナリオのステップバイステップフロー | 完了 |
 | `information-architecture.md` | エンティティ階層、属性定義、画面×データマッピング、派生データ | 完了 |
 | `non-requirements.md` | v2 スコープ外（確定 3 件 + 意図的後回し 9 件）、理由付き | 完了 |

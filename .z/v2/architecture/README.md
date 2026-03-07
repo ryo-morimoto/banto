@@ -8,13 +8,13 @@
 
 | ファイル | 内容 | 状態 |
 |---------|------|------|
-| `agent-provider-interface.md` | AgentProvider / AgentSession / AgentCapabilities 型定義、メソッド契約、イベント分類 | - |
-| `providers/claude-code.md` | Claude Code プロバイダー: PTY 起動、hooks 統合、MCP 権限、stream-json、resume | - |
-| `providers/codex.md` | Codex プロバイダー: app-server JSON-RPC、スレッドモデル、型生成 | - |
-| `providers/acp.md` | ACP プロバイダー: クライアント実装、capability ネゴシエーション、universal fallback 挙動 | - |
-| `providers/pty-fallback.md` | Raw PTY プロバイダー: 状態検出ヒューリスティクス、ターミナルリレー | - |
-| `data-model.md` | SQLite スキーマ: テーブル、インデックス、マイグレーション、イベントレジャー設計 | - |
-| `api-routes.md` | Elysia REST + WebSocket エンドポイント、リクエスト/レスポンス型、エラーコード | - |
-| `terminal-relay.md` | サーバー側 PTY 管理、WebSocket バイナリプロトコル、クライアント描画（restty/xterm.js） | - |
-| `event-system.md` | イベントレジャー: イベント型、追記フロー、実体化、WebSocket でクライアントへ push | - |
-| `dual-mode-ui.md` | ターミナルビュー vs 構造化会話ビュー: 使い分け条件、必要データ | - |
+| `agent-provider-interface.md` | AgentProvider / AgentSession / AgentCapabilities 型定義、メソッド契約、イベント分類 | 完了 |
+| `providers/claude-code.md` | Claude Code プロバイダー: PTY 起動、hooks 統合、MCP 権限、resume | 完了 |
+| `providers/codex.md` | Codex プロバイダー: app-server JSON-RPC、スレッドモデル | 完了 |
+| `providers/acp.md` | ACP プロバイダー: クライアント実装、capability ネゴシエーション、universal fallback | 完了 |
+| `providers/pty-fallback.md` | Raw PTY プロバイダー: 状態検出ヒューリスティクス | 完了 |
+| `data-model.md` | SQLite スキーマ: テーブル、インデックス、マイグレーション、クエリパターン | 完了 |
+| `api-routes.md` | Elysia REST + WebSocket エンドポイント、リクエスト/レスポンス型、エラーコード | 完了 |
+| `terminal-relay.md` | サーバー側 PTY 管理、WebSocket バイナリプロトコル、Ring Buffer、クライアント描画 | 完了 |
+| `event-system.md` | イベントレジャー: 追記フロー、実体化、通知生成、auto_approve、WebSocket push | 完了 |
+| `dual-mode-ui.md` | ターミナルビュー vs 構造化会話ビュー: 使い分け条件、コンポーネント構造 | 完了 |
