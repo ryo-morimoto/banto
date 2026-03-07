@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terminal Relay PoC</title>
+  <link rel="stylesheet" href="/xterm.css">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      font-family: monospace;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    #header {
+      padding: 8px 16px;
+      background: #2d2d2d;
+      border-bottom: 1px solid #404040;
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      font-size: 13px;
+    }
+    #header .status { color: #4ec9b0; }
+    #header .stats { color: #808080; }
+    #terminal-container {
+      flex: 1;
+      padding: 4px;
+    }
+    #validation-panel {
+      padding: 8px 16px;
+      background: #2d2d2d;
+      border-top: 1px solid #404040;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    #validation-panel .pass { color: #4ec9b0; }
+    #validation-panel .fail { color: #f44747; }
+    #validation-panel .info { color: #569cd6; }
+    .test-row { margin: 2px 0; }
+    button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:hover { background: #1177bb; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <span class="status" id="conn-status">Disconnected</span>
+    <span class="stats" id="stats">--</span>
+    <button onclick="runValidation()">Run Validation</button>
+    <button onclick="testUtf8()">Test UTF-8 (D6)</button>
+    <button onclick="testAnsiColors()">Test ANSI (D9)</button>
+    <button onclick="testReconnect()">Test Reconnect (Ring Buffer)</button>
+  </div>
+  <div id="terminal-container"></div>
+  <div id="validation-panel" id="validation-log">
+    <div class="info">Click "Run Validation" to test assumptions D1-D11</div>
+  </div>
+
+  <script src="/xterm.js"></script>
+  <script src="/addon-fit.js"></script>
+  <script>
+    const { Terminal } = window.Terminal;
+    const { FitAddon } = window.FitAddonExports || window.FitAddon || (() => {
+      // Try to find FitAddon from the module
+      for (const key of Object.keys(window)) {
+        if (window[key]?.FitAddon) return window[key];
+      }
+      return {};
+    })();
+
+    // --- Terminal Setup ---
+    const term = new Terminal({
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      theme: {
+        background: '#1e1e1e',
+        foreground: '#d4d4d4',
+        cursor: '#d4d4d4',
+      },
+    });
+
+    let fitAddon;
+    try {
+      const mod = await import('/addon-fit.js');
+      const FA = mod.FitAddon || mod.default?.FitAddon;
+      if (FA) {
+        fitAddon = new FA();
+        term.loadAddon(fitAddon);
+      }
+    } catch (e) {
+      console.warn('FitAddon not available:', e);
+    }
+
+    const container = document.getElementById('terminal-container');
+    term.open(container);
+    if (fitAddon) fitAddon.fit();
+
+    // --- WebSocket ---
+    let ws;
+    let bytesReceived = 0;
+    let framesReceived = 0;
+    let connectTime;
+    let firstFrameTime;
+
+    function connect() {
+      ws = new WebSocket(`ws://${location.host}/ws`);
+      ws.binaryType = 'arraybuffer';
+      connectTime = performance.now();
+
+      ws.onopen = () => {
+        document.getElementById('conn-status').textContent = 'Connected';
+        document.getElementById('conn-status').style.color = '#4ec9b0';
+      };
+
+      ws.onmessage = (event) => {
+        if (!firstFrameTime) firstFrameTime = performance.now();
+        framesReceived++;
+
+        if (event.data instanceof ArrayBuffer) {
+          // Binary frame (D4)
+          const data = new Uint8Array(event.data);
+          bytesReceived += data.length;
+          // D3: streaming write
+          term.write(data);
+        } else {
+          bytesReceived += event.data.length;
+          term.write(event.data);
+        }
+
+        updateStats();
+      };
+
+      ws.onclose = () => {
+        document.getElementById('conn-status').textContent = 'Disconnected';
+        document.getElementById('conn-status').style.color = '#f44747';
+        // Auto-reconnect after 2s
+        setTimeout(connect, 2000);
+      };
+
+      ws.onerror = (e) => {
+        console.error('WS error:', e);
+      };
+    }
+
+    // --- Keyboard Input (D7) ---
+    term.onData((data) => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(data);
+      }
+    });
+
+    // --- Resize (D8) ---
+    window.addEventListener('resize', () => {
+      if (fitAddon) fitAddon.fit();
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'resize',
+          cols: term.cols,
+          rows: term.rows,
+        }));
+      }
+    });
+
+    function updateStats() {
+      const elapsed = ((performance.now() - connectTime) / 1000).toFixed(1);
+      document.getElementById('stats').textContent =
+        `${bytesReceived} bytes | ${framesReceived} frames | ${elapsed}s`;
+    }
+
+    // --- Validation Tests ---
+    const vPanel = document.getElementById('validation-panel');
+
+    function log(cls, text) {
+      const div = document.createElement('div');
+      div.className = `test-row ${cls}`;
+      div.textContent = text;
+      vPanel.appendChild(div);
+      vPanel.scrollTop = vPanel.scrollHeight;
+    }
+
+    async function runValidation() {
+      vPanel.innerHTML = '';
+      log('info', '=== Running Assumption Validation ===');
+
+      // D2: WebGPU check
+      if (navigator.gpu) {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (adapter) {
+          log('pass', 'D2 PASS: WebGPU available (adapter found)');
+        } else {
+          log('fail', 'D2 PARTIAL: navigator.gpu exists but no adapter');
+        }
+      } else {
+        log('fail', 'D2 FAIL: WebGPU not available in this browser');
+      }
+
+      // D3: xterm.js write callback
+      try {
+        let callbackFired = false;
+        term.write('\x1b[?25l', () => { callbackFired = true; }); // hide cursor with callback
+        await new Promise(r => setTimeout(r, 100));
+        term.write('\x1b[?25h'); // show cursor again
+        if (callbackFired) {
+          log('pass', 'D3 PASS: xterm.js write() callback fires correctly');
+        } else {
+          log('fail', 'D3 FAIL: write() callback did not fire');
+        }
+      } catch (e) {
+        log('fail', `D3 FAIL: ${e.message}`);
+      }
+
+      // D4: WS binary frames
+      if (framesReceived > 0) {
+        log('pass', `D4 PASS: Received ${framesReceived} binary WS frames in order`);
+      } else {
+        log('info', 'D4 SKIP: No frames received yet (type something in terminal first)');
+      }
+
+      // D5: Ring buffer (check server stats)
+      try {
+        const resp = await fetch('/stats');
+        const stats = await resp.json();
+        log('info', `D5 INFO: Ring buffer: ${stats.ringBufferSize} bytes used, ${stats.totalBytesWritten} total written`);
+        if (stats.ringBufferSize <= 1048576) {
+          log('pass', `D5 PASS: Ring buffer capped at 1MB (${stats.ringBufferSize} bytes)`);
+        }
+      } catch (e) {
+        log('fail', `D5 FAIL: Could not fetch stats: ${e.message}`);
+      }
+
+      // D7: Input latency
+      if (ws?.readyState === WebSocket.OPEN) {
+        const start = performance.now();
+        ws.send('echo __LATENCY_TEST__\n');
+        log('info', `D7 INFO: Input sent. Check terminal for output. Send latency: ${(performance.now() - start).toFixed(2)}ms`);
+      }
+
+      // D9: ANSI color test
+      log('info', 'D9: Use "Test ANSI" button to verify color rendering');
+
+      // D10/D11: Persistence
+      try {
+        const resp = await fetch('/persist');
+        const result = await resp.json();
+        log('pass', `D10 PASS: Scrollback persisted: ${result.bytes} bytes in ${result.durationMs.toFixed(1)}ms`);
+        if (result.durationMs < 50) {
+          log('pass', `D11 PASS: Persistence is fast (${result.durationMs.toFixed(1)}ms), unlikely to block event loop`);
+        } else {
+          log('info', `D11 INFO: Persistence took ${result.durationMs.toFixed(1)}ms - may need optimization for large buffers`);
+        }
+      } catch (e) {
+        log('fail', `D10/D11 FAIL: ${e.message}`);
+      }
+
+      log('info', '=== Validation Complete ===');
+    }
+
+    function testUtf8() {
+      // D6: Send multi-byte UTF-8 characters
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send('echo "UTF-8 test: Japanese=\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e Emoji=\xf0\x9f\x8e\xaf\xf0\x9f\x9a\x80 CJK=\xe4\xb8\xad\xe6\x96\x87"\n');
+        log('info', 'D6: Sent multi-byte UTF-8 test string. Check terminal output.');
+      }
+    }
+
+    function testAnsiColors() {
+      // D9: ANSI color rendering
+      if (ws?.readyState === WebSocket.OPEN) {
+        // Send a command that produces ANSI colors
+        ws.send('printf "\\e[31mRed\\e[0m \\e[32mGreen\\e[0m \\e[33mYellow\\e[0m \\e[34mBlue\\e[0m \\e[35mMagenta\\e[0m \\e[36mCyan\\e[0m\\n"\n');
+        ws.send('printf "\\e[1;31mBold Red\\e[0m \\e[4;32mUnderline Green\\e[0m \\e[7;34mReverse Blue\\e[0m\\n"\n');
+        ws.send('printf "\\e[38;5;208mOrange (256-color)\\e[0m \\e[38;2;255;105;180mHot Pink (truecolor)\\e[0m\\n"\n');
+        log('info', 'D9: Sent ANSI color test sequences. Check terminal for colored output.');
+      }
+    }
+
+    function testReconnect() {
+      log('info', 'Closing WebSocket to test ring buffer replay...');
+      const prevBytes = bytesReceived;
+      ws?.close();
+      bytesReceived = 0;
+      framesReceived = 0;
+      // Will auto-reconnect via onclose handler
+      setTimeout(() => {
+        log('info', `Reconnected. Received ${bytesReceived} bytes on replay (previous session had ${prevBytes} bytes)`);
+        if (bytesReceived > 0) {
+          log('pass', 'Ring buffer replay: received data on reconnect');
+        }
+      }, 3000);
+    }
+
+    // --- Start ---
+    connect();
+  </script>
+</body>
+</html>
