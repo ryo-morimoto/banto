@@ -4,7 +4,8 @@ A dashboard to jot down tasks, throw them at an agent, and watch the results. Ru
 
 ## Principles
 
-- CC only: No multi-provider abstractions
+- Best interface per agent: Use each agent's richest available integration (native protocol > ACP > PTY fallback)
+- ACP as universal fallback: Any ACP-compatible agent is automatically supported
 - 1 session = 1 unit of execution
 - One view: Active tasks listed by project on a single screen
 - Jot, throw, watch: Task management → agent execution → result review
@@ -40,13 +41,29 @@ src/
 │   │   ├── routes.ts
 │   │   ├── service.ts
 │   │   └── repository.ts
-│   └── sessions/
-│       ├── routes.ts
-│       ├── service.ts
-│       ├── repository.ts
-│       ├── runner.ts         # Session execution orchestration
-│       ├── container.ts      # nixos-container operations
-│       └── agent.ts          # Agent SDK operations
+│   ├── sessions/
+│   │   ├── routes.ts
+│   │   ├── service.ts
+│   │   ├── repository.ts
+│   │   ├── runner.ts         # Session execution orchestration
+│   │   ├── events.ts         # Event ledger operations
+│   │   └── terminal-relay.ts # WebSocket binary relay
+│   └── agents/               # Agent provider layer
+│       ├── types.ts           # AgentProvider, AgentSession interfaces
+│       ├── registry.ts        # Provider registry + factory
+│       ├── claude-code/
+│       │   ├── provider.ts    # PTY + hooks + MCP integration
+│       │   ├── hooks.ts       # HTTP hook endpoint handler
+│       │   └── mcp-permission.ts
+│       ├── codex/
+│       │   ├── provider.ts    # app-server JSON-RPC wrapper
+│       │   └── rpc-client.ts  # JSON-RPC 2.0 client
+│       ├── acp/
+│       │   ├── provider.ts    # ACP client wrapper (universal)
+│       │   └── client.ts      # ACP JSON-RPC 2.0 client
+│       └── pty/
+│           ├── provider.ts    # Raw PTY fallback
+│           └── state-detector.ts
 ├── client/
 │   ├── app.tsx
 │   ├── tasks/
@@ -88,6 +105,29 @@ Strictly follow Red → Green → Refactor.
 - All domain-related code lives in its domain directory
 - Only shared resources (DB connection, etc.) live outside domain directories
 - Error handling only at boundaries (API layer). No unnecessary try-catch in internal code
+
+## Todo Workflow
+
+- Todo files live in `todos/` directory
+- When working on a research todo (deep-research), the goal MUST include saving research results to `.z/research/<topic>.md`. Never consider a research task complete without persisting the findings.
+
+## Research File Structure
+
+All competitor deep-research files in `.z/research/` MUST follow the canonical structure defined in `.z/research/TEMPLATE.md`. The required H2 sections in order:
+
+1. **Header**: `Date:`, `Sources:` (bullet list), 1-paragraph description, `---`
+2. `## Overview`
+3. `## Architecture`
+4. `## Well-Regarded Features`
+5. `## Poorly-Regarded Features / Pain Points` (with optional `### Top Issues by Reaction Count`)
+6. `## User Feedback Summary`
+7. `## Learnings for banto` (with exactly 4 H3s: What Users Actually Want / Technical Design Lessons / UX Pattern Lessons / Business & Ecosystem Lessons)
+8. `## Sources`
+
+Rules:
+- No H2 numbering
+- `---` between H2 sections
+- Index every new file in `.z/research/README.md`
 
 ## Language Policy
 
