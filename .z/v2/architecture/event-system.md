@@ -3,7 +3,7 @@
 イベントレジャーの設計、追記フロー、実体化、WebSocket でのクライアント push。
 セッションの状態管理はすべてこのイベントシステムを経由する。
 
-上流: `agent-provider-interface.md` (AgentEvent)、`data-model.md` (session_events テーブル)
+上流: `agent-provider-interface.md` (AgentEvent, Branded Types)、`data-model.md` (session_events テーブル)
 
 ---
 
@@ -41,9 +41,9 @@ SessionRunner がイベントを受け取ったとき:
 
 ```typescript
 class SessionRunner {
-  private seqCounters = new Map<string, number>();  // sessionId -> next seq
+  private seqCounters = new Map<SessionId, number>();
 
-  private handleEvent(sessionId: string, event: AgentEvent) {
+  private handleEvent(sessionId: SessionId, event: AgentEvent) {
     const seq = this.nextSeq(sessionId);
 
     // 1. Append to ledger
@@ -66,7 +66,7 @@ class SessionRunner {
     this.wsBroadcast(sessionId, { seq, ...event });
   }
 
-  private nextSeq(sessionId: string): number {
+  private nextSeq(sessionId: SessionId): number {
     const current = this.seqCounters.get(sessionId) ?? 0;
     const next = current + 1;
     this.seqCounters.set(sessionId, next);
@@ -106,10 +106,10 @@ GROUP BY session_id;
 ```typescript
 // AgentEvent は discriminated union。switch で型が絞られる。
 // キャストは不要。
-private materialize(sessionId: string, event: AgentEvent) {
+private materialize(sessionId: SessionId, event: AgentEvent) {
   switch (event.type) {
     case "permission_request":
-      // event.payload.requestId, .tool, .args が確定
+      // event.payload.requestId: RequestId, .tool, .args が確定
       this.sessionRepo.update(sessionId, {
         status: "waiting_permission",
         status_confidence: event.confidence,
@@ -155,7 +155,7 @@ private materialize(sessionId: string, event: AgentEvent) {
 イベントに基づいて notifications テーブルに INSERT + Push 通知を送信する。
 
 ```typescript
-private maybeNotify(sessionId: string, event: AgentEvent) {
+private maybeNotify(sessionId: SessionId, event: AgentEvent) {
   const session = this.sessionRepo.get(sessionId);
   const task = this.taskRepo.get(session.task_id);
 
@@ -195,7 +195,7 @@ private maybeNotify(sessionId: string, event: AgentEvent) {
 **セッション終了時の通知は SessionRunner.onExit() で生成:**
 
 ```typescript
-private onExit(sessionId: string, info: ExitInfo) {
+private onExit(sessionId: SessionId, info: ExitInfo) {
   const session = this.sessionRepo.get(sessionId);
   const task = this.taskRepo.get(session.task_id);
 
@@ -228,33 +228,37 @@ private onExit(sessionId: string, info: ExitInfo) {
 クライアントに push するメッセージの型定義。
 
 ```typescript
+type SessionStatus = "pending" | "running" | "waiting_permission" | "done" | "failed";
+type NotificationType = "permission_required" | "context_warning" | "session_done" | "session_failed";
+type NotificationPriority = "critical" | "high" | "normal";
+
 type WsMessage =
-  | { type: "session_event"; sessionId: string; event: SessionEventPayload }
-  | { type: "status_changed"; sessionId: string; status: string; taskId: string }
-  | { type: "context_update"; sessionId: string; contextPercent: number }
+  | { type: "session_event"; sessionId: SessionId; event: SessionEventPayload }
+  | { type: "status_changed"; sessionId: SessionId; status: SessionStatus; taskId: TaskId }
+  | { type: "context_update"; sessionId: SessionId; contextPercent: number }
   | { type: "notification"; notification: NotificationPayload }
   | { type: "notification_read"; notificationId: number }
   | { type: "task_created"; task: TaskPayload }
-  | { type: "terminal_data"; sessionId: string }  // binary frame は別チャネル
+  | { type: "terminal_data"; sessionId: SessionId };  // binary frame は別チャネル
 
-interface SessionEventPayload {
+type SessionEventPayload = {
   seq: number;
-  type: string;
-  source: string;
-  confidence: string;
-  payload: Record<string, unknown>;
-  occurredAt: string;
-}
+  type: AgentEvent["type"];
+  source: EventSource;
+  confidence: Confidence;
+  payload: AgentEvent["payload"];
+  occurredAt: string;  // ISO 8601
+};
 
-interface NotificationPayload {
+type NotificationPayload = {
   id: number;
-  sessionId: string | null;
-  type: string;
-  priority: string;
+  sessionId: SessionId | null;
+  type: NotificationType;
+  priority: NotificationPriority;
   title: string;
   body: string | null;
-  createdAt: string;
-}
+  createdAt: string;  // ISO 8601
+};
 ```
 
 ### チャネル設計
@@ -272,7 +276,6 @@ interface NotificationPayload {
 クライアントが再接続したとき、サーバーは以下を送信:
 
 ```typescript
-// ws.ts: onConnection
 async function handleReconnect(ws: WebSocket) {
   // 1. 全タスクの最新状態
   const tasks = await taskService.listWithLatestSession();
@@ -289,11 +292,9 @@ async function handleReconnect(ws: WebSocket) {
 ターミナルチャネルの再接続:
 
 ```typescript
-// ws.ts: onTerminalConnection
-async function handleTerminalReconnect(ws: WebSocket, sessionId: string) {
+async function handleTerminalReconnect(ws: WebSocket, sessionId: SessionId) {
   const runner = sessionRunners.get(sessionId);
   if (runner?.ringBuffer) {
-    // Ring buffer の内容を replay
     ws.send(runner.ringBuffer.getAll());  // binary
   }
 }
@@ -307,39 +308,40 @@ async function handleTerminalReconnect(ws: WebSocket, sessionId: string) {
 
 ```typescript
 class AutoApproveRules {
-  // sessionId -> rules
-  private rules = new Map<string, ApproveRule[]>();
+  private rules = new Map<SessionId, ApproveRule[]>();
 
-  add(sessionId: string, rule: ApproveRule) {
+  add(sessionId: SessionId, rule: ApproveRule) {
     const existing = this.rules.get(sessionId) ?? [];
     existing.push(rule);
     this.rules.set(sessionId, existing);
   }
 
-  matches(sessionId: string, event: AgentEvent): boolean {
+  matches(sessionId: SessionId, event: AgentEvent): boolean {
     if (event.type !== "permission_request") return false;
     const rules = this.rules.get(sessionId);
     if (!rules) return false;
 
-    const p = event.payload as { tool: string; args: Record<string, unknown> };
-    return rules.some(r => r.tool === p.tool && this.matchPattern(r.pattern, p.args));
+    // discriminated union で絞り込み済み。event.payload.tool, .args が確定
+    return rules.some(r =>
+      r.tool === event.payload.tool &&
+      this.matchPattern(r.pattern, event.payload.args)
+    );
   }
 
-  cleanup(sessionId: string) {
+  cleanup(sessionId: SessionId) {
     this.rules.delete(sessionId);
   }
 
-  private matchPattern(pattern: string, args: Record<string, unknown>): boolean {
-    const filePath = (args.file_path ?? args.path ?? "") as string;
-    // glob マッチ: "src/**" → src/ 以下すべて
+  private matchPattern(pattern: string, args: { file_path?: string; [key: string]: unknown }): boolean {
+    const filePath = args.file_path ?? "";
     return minimatch(filePath, pattern);
   }
 }
 
-interface ApproveRule {
-  tool: string;     // e.g. "Write"
-  pattern: string;  // e.g. "src/**" or "*" (all)
-}
+type ApproveRule = {
+  tool: string;
+  pattern: string;  // glob: "src/**" or "*" (all)
+};
 ```
 
 **統合ポイント**: SessionRunner の handleEvent() 内で permission_request 時に照合。
@@ -347,7 +349,7 @@ interface ApproveRule {
 ```typescript
 case "permission_request":
   if (this.autoApproveRules.matches(sessionId, event)) {
-    // 自動承認
+    // 自動承認 — event.payload.requestId は RequestId 型
     this.eventRepo.insert({
       session_id: sessionId,
       seq: this.nextSeq(sessionId),

@@ -3,9 +3,54 @@
 AgentProvider / AgentSession の型定義、メソッド契約、イベント分類。
 全プロバイダーが準拠する抽象。個別プロバイダーの実装詳細は `providers/` を参照。
 
-Discriminated union で設計する。消費者は自分に関係ない capability を知る必要がない。
-
 上流: `../../curation/architecture-decision.md` Section 4
+
+---
+
+## 型設計方針
+
+1. **Discriminated union**: 消費者は自分に関係ない capability を知る必要がない
+2. **Branded types**: `string` はドメインの意図を喪失する。ID は branded type で取り違えをコンパイル時に検出
+3. **`type` デフォルト**: `interface` は declaration merging で外部から拡張される。sealed な型は `type` で定義。`interface` は意図的拡張点（EventEmitter 等の外部契約）のみ
+
+---
+
+## Branded Types
+
+全 ID 型の基盤。ランタイムコストゼロ。`unique symbol` で他の branded type と交差しない。
+
+```typescript
+// shared/brand.ts
+declare const __brand: unique symbol;
+type Brand<T, B extends string> = T & { readonly [__brand]: B };
+```
+
+ドメイン ID の定義:
+
+```typescript
+// shared/ids.ts
+type SessionId = Brand<string, "SessionId">;
+type TaskId = Brand<string, "TaskId">;
+type ProjectId = Brand<string, "ProjectId">;
+type ProviderId = Brand<string, "ProviderId">;
+type RequestId = Brand<string, "RequestId">;
+
+// Constructor（バリデーション + ブランド付与の唯一の入口）
+const SessionId = (raw: string): SessionId => raw as SessionId;
+const TaskId = (raw: string): TaskId => raw as TaskId;
+const ProjectId = (raw: string): ProjectId => raw as ProjectId;
+const ProviderId = (raw: string): ProviderId => raw as ProviderId;
+const RequestId = (raw: string): RequestId => raw as RequestId;
+```
+
+**効果**: `getSession(taskId)` がコンパイルエラーになる。`string` では通っていた。
+
+```typescript
+declare function getSession(id: SessionId): Session;
+
+const tid = TaskId("task-123");
+getSession(tid);  // Compile error: TaskId is not assignable to SessionId
+```
 
 ---
 
@@ -18,6 +63,9 @@ type AgentSession = TerminalSession | StructuredSession;
 ```
 
 ### 共通部分
+
+`BaseSession` は `extends EventEmitter` が必要なため `interface` を使う（外部契約）。
+ただし直接使用は禁止。TerminalSession / StructuredSession 経由のみ。
 
 ```typescript
 interface BaseSession extends EventEmitter<AgentSessionEvents> {
@@ -36,7 +84,7 @@ interface BaseSession extends EventEmitter<AgentSessionEvents> {
 PTY ベース。Claude Code, PTY Fallback。
 
 ```typescript
-interface TerminalSession extends BaseSession {
+type TerminalSession = BaseSession & {
   readonly mode: "terminal";
 
   /** PTY 出力バイトストリーム。WebSocket 経由でクライアントにリレー */
@@ -47,28 +95,28 @@ interface TerminalSession extends BaseSession {
 
   /** PTY サイズ変更 */
   resizeTerminal(cols: number, rows: number): void;
-}
+};
 ```
-
-ターミナルモードでは:
-- mid-session steering = PTY write（writeTerminal）
-- 権限応答 = プロバイダーが permissions 対応なら respondToPermission イベント経由、非対応ならユーザーがターミナルで直接入力
 
 ### StructuredSession
 
 プロトコルベース。Codex, ACP。
 
 ```typescript
-interface StructuredSession extends BaseSession {
+type StructuredSession = BaseSession & {
   readonly mode: "structured";
 
   /** 実行中のエージェントにメッセージ送信 */
   sendMessage(message: string): Promise<void>;
 
   /** 権限リクエストに応答 */
-  respondToPermission(requestId: string, decision: PermissionDecision): Promise<void>;
-}
+  respondToPermission(requestId: RequestId, decision: PermissionDecision): Promise<void>;
+};
 ```
+
+ターミナルモードでは:
+- mid-session steering = PTY write（writeTerminal）
+- 権限応答 = プロバイダーが permissions 対応なら respondToPermission イベント経由、非対応ならユーザーがターミナルで直接入力
 
 構造化モードでは:
 - mid-session steering = sendMessage
@@ -79,20 +127,12 @@ interface StructuredSession extends BaseSession {
 terminal モードでも CC は MCP 経由で権限制御できる。これを型でどう表現するか:
 
 ```typescript
-// TerminalSession の権限応答は SessionRunner が仲介する。
-// CC: SessionRunner が MCP permission waiter に応答を渡す
-// PTY Fallback: 権限応答 API なし。ユーザーがターミナルで直接操作
-
-// SessionRunner 側の分岐:
-function handlePermissionResponse(session: AgentSession, requestId: string, decision: PermissionDecision) {
+function handlePermissionResponse(session: AgentSession, requestId: RequestId, decision: PermissionDecision) {
   switch (session.mode) {
     case "structured":
-      // 型が respondToPermission を保証する
       session.respondToPermission(requestId, decision);
       break;
     case "terminal":
-      // プロバイダー固有のメカニズム（CC: MCP waiter）
-      // SessionRunner がプロバイダー別ハンドラに委譲
       permissionHandlers.get(session.provider.id)?.(requestId, decision);
       break;
   }
@@ -103,7 +143,7 @@ function handlePermissionResponse(session: AgentSession, requestId: string, deci
 
 ## AgentEvent（discriminated union）
 
-`Record<string, unknown>` は使わない。type ごとに payload の型が確定する。
+type ごとに payload の型が確定する。`Record<string, unknown>` や `as` キャストは不要。
 
 ```typescript
 type EventSource = "hook" | "protocol" | "mcp" | "process" | "heuristic" | "user" | "auto";
@@ -118,7 +158,7 @@ type AgentEvent =
   | ContextUpdateEvent
   | ErrorEvent;
 
-interface MessageEvent {
+type MessageEvent = {
   type: "message";
   source: EventSource;
   confidence: Confidence;
@@ -126,9 +166,9 @@ interface MessageEvent {
     role: "assistant" | "user";
     content: string;
   };
-}
+};
 
-interface ToolUseEvent {
+type ToolUseEvent = {
   type: "tool_use";
   source: EventSource;
   confidence: Confidence;
@@ -138,12 +178,12 @@ interface ToolUseEvent {
       file_path?: string;
       command?: string;
       diff?: string;
-      [key: string]: unknown;
+      [key: string]: unknown;  // エージェントごとに異なる引数を許容
     };
   };
-}
+};
 
-interface ToolResultEvent {
+type ToolResultEvent = {
   type: "tool_result";
   source: EventSource;
   confidence: Confidence;
@@ -152,21 +192,25 @@ interface ToolResultEvent {
     result?: string;
     error?: string;
   };
-}
+};
 
-interface PermissionRequestEvent {
+type PermissionRequestEvent = {
   type: "permission_request";
   source: EventSource;
   confidence: Confidence;
   payload: {
-    requestId: string;
+    requestId: RequestId;
     tool: string;
-    args: Record<string, unknown>;
+    args: {
+      file_path?: string;
+      command?: string;
+      [key: string]: unknown;  // ツール固有の引数
+    };
     description?: string;
   };
-}
+};
 
-interface CostUpdateEvent {
+type CostUpdateEvent = {
   type: "cost_update";
   source: EventSource;
   confidence: Confidence;
@@ -175,9 +219,9 @@ interface CostUpdateEvent {
     tokens_out: number;
     cost_usd?: number;
   };
-}
+};
 
-interface ContextUpdateEvent {
+type ContextUpdateEvent = {
   type: "context_update";
   source: EventSource;
   confidence: Confidence;
@@ -186,9 +230,9 @@ interface ContextUpdateEvent {
     tokens_used: number;
     tokens_max: number;
   };
-}
+};
 
-interface ErrorEvent {
+type ErrorEvent = {
   type: "error";
   source: EventSource;
   confidence: Confidence;
@@ -196,8 +240,10 @@ interface ErrorEvent {
     message: string;
     code?: string;
   };
-}
+};
 ```
+
+**`Record<string, unknown>` の排除**: PermissionRequestEvent の `args` は以前 `Record<string, unknown>` だったが、ToolUseEvent と同じ index signature パターンに統一。既知のキー（file_path, command）は型で明示し、未知のキーは index signature で許容。
 
 **使用例（型安全な switch）:**
 
@@ -213,7 +259,7 @@ function handleEvent(event: AgentEvent) {
       console.log(`Tool: ${event.payload.tool}`);
       break;
     case "permission_request":
-      // event.payload.requestId が確定
+      // event.payload.requestId が RequestId 型で確定
       showPermissionUI(event.payload.requestId, event.payload.tool);
       break;
     // ... exhaustive check: 未処理の type があればコンパイルエラー
@@ -230,23 +276,23 @@ resume 対応の有無で分岐。optional メソッドを排除。
 ```typescript
 type AgentProvider = ResumableProvider | NonResumableProvider;
 
-interface BaseProvider {
-  readonly id: string;
+type BaseProvider = {
+  readonly id: ProviderId;
   readonly name: string;
   readonly mode: "terminal" | "structured";
 
   check(): Promise<string | null>;
   createSession(config: SessionConfig): AgentSession;
-}
+};
 
-interface ResumableProvider extends BaseProvider {
+type ResumableProvider = BaseProvider & {
   readonly resume: true;
   resumeSession(config: ResumeConfig): AgentSession;
-}
+};
 
-interface NonResumableProvider extends BaseProvider {
+type NonResumableProvider = BaseProvider & {
   readonly resume: false;
-}
+};
 ```
 
 **プロバイダー別の型:**
@@ -261,13 +307,11 @@ interface NonResumableProvider extends BaseProvider {
 **使用例:**
 
 ```typescript
-// Resume ボタン表示判定
 if (provider.resume) {
   // provider.resumeSession が存在することが型で保証される
   showResumeButton();
 }
 
-// UI モード分岐
 switch (provider.mode) {
   case "terminal":
     return <TerminalView />;
@@ -281,27 +325,27 @@ switch (provider.mode) {
 ## SessionConfig / ResumeConfig
 
 ```typescript
-interface SessionConfig {
-  sessionId: string;
+type SessionConfig = {
+  sessionId: SessionId;
   prompt: string;
   projectPath: string;
   worktreePath?: string;
-}
+};
 
-interface TerminalSessionConfig extends SessionConfig {
+type TerminalSessionConfig = SessionConfig & {
   terminalSize: { cols: number; rows: number };
-}
+};
 
-interface ResumeConfig {
-  sessionId: string;
-  agentSessionId: string;
+type ResumeConfig = {
+  sessionId: SessionId;
+  agentSessionId: string;  // エージェント側の ID。形式がプロバイダーごとに異なるため string
   projectPath: string;
   worktreePath?: string;
-}
+};
 
-interface TerminalResumeConfig extends ResumeConfig {
+type TerminalResumeConfig = ResumeConfig & {
   terminalSize: { cols: number; rows: number };
-}
+};
 ```
 
 terminal プロバイダーは TerminalSessionConfig を受け取る。structured プロバイダーは SessionConfig を受け取る。terminalSize が不要な側に渡らない。
@@ -311,29 +355,29 @@ terminal プロバイダーは TerminalSessionConfig を受け取る。structure
 ## イベント定義
 
 ```typescript
-interface AgentSessionEvents {
+type AgentSessionEvents = {
   status: (status: AgentStatus) => void;
   event: (event: AgentEvent) => void;
   exit: (info: ExitInfo) => void;
-}
+};
 
 type AgentStatusType = "running" | "waiting_permission" | "idle";
 
-interface AgentStatus {
+type AgentStatus = {
   status: AgentStatusType;
   confidence: Confidence;
-}
+};
 
-interface ExitInfo {
+type ExitInfo = {
   code: number;
   signal?: string;
   summary?: string;
-}
+};
 
-interface PermissionDecision {
-  requestId: string;
-  approved: boolean;
-}
+type PermissionDecision = {
+  readonly requestId: RequestId;
+  readonly approved: boolean;
+};
 ```
 
 **注意**: `pending`, `done`, `failed` は AgentSession が emit しない。SessionRunner がライフサイクルとして設定:
@@ -440,18 +484,20 @@ AgentSession          SessionRunner              DB / WebSocket
 ## Provider Registry
 
 ```typescript
+// AgentProviderRegistry は意図的拡張点。プラグインシステムの境界。
+// interface を使う唯一の正当な理由。
 interface AgentProviderRegistry {
   register(provider: AgentProvider): void;
-  get(id: string): AgentProvider | undefined;
+  get(id: ProviderId): AgentProvider | undefined;
   listAvailable(): Promise<AvailableProvider[]>;
 }
 
-interface AvailableProvider {
-  id: string;
+type AvailableProvider = {
+  id: ProviderId;
   name: string;
   mode: "terminal" | "structured";
   resume: boolean;
-}
+};
 ```
 
 **初期化フロー:**
