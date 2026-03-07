@@ -3,14 +3,15 @@
 ターミナルビュー vs 構造化会話ビューの使い分け条件、表示コンポーネント、データ要件。
 S3 実行ビューの中核設計。
 
-上流: `agent-provider-interface.md` (AgentCapabilities)、`../product/screen-inventory.md` (S3)
+上流: `agent-provider-interface.md` (AgentProvider.mode, branded types)、`../product/screen-inventory.md` (S3)
 
 ---
 
 ## モード決定
 
 ```typescript
-const mode = session.provider.capabilities.terminal ? "terminal" : "structured";
+// provider.mode で分岐。discriminated union により型安全
+const mode: "terminal" | "structured" = session.provider.mode;
 ```
 
 | mode | 適用プロバイダー | S3 メインパネル |
@@ -49,13 +50,13 @@ ctx % の色:
 折りたたみ可能。両モード共通。
 
 ```typescript
-interface TimelineEntry {
+type TimelineEntry = {
   seq: number;
-  time: string;       // HH:MM
-  type: AgentEventType;
-  summary: string;    // 1 行要約
-  detail?: unknown;   // 展開時の詳細
-}
+  time: string;                 // HH:MM
+  type: AgentEvent["type"];     // discriminated union の type フィールド
+  summary: string;              // 1 行要約
+  detail?: unknown;             // 展開時の詳細
+};
 ```
 
 | イベント type | アイコン | summary 例 |
@@ -147,10 +148,10 @@ User keyboard               →  WS binary → PTY write
 session_events を type に応じて異なるコンポーネントで描画:
 
 ```typescript
-function renderEvent(event: SessionEvent): ReactNode {
+function renderEvent(event: AgentEvent): ReactNode {
   switch (event.type) {
     case "message":
-      return <MessageBubble role={event.source === "user" ? "user" : "assistant"} content={event.payload.content} />;
+      return <MessageBubble role={event.payload.role} content={event.payload.content} />;
 
     case "tool_use": {
       const { tool, args } = event.payload;
@@ -164,6 +165,7 @@ function renderEvent(event: SessionEvent): ReactNode {
       return <ToolResultBlock tool={event.payload.tool} result={event.payload.result} error={event.payload.error} />;
 
     case "permission_request":
+      // event.payload.requestId は RequestId 型
       return <PermissionCard requestId={event.payload.requestId} tool={event.payload.tool} args={event.payload.args} />;
 
     case "error":
@@ -178,7 +180,7 @@ function renderEvent(event: SessionEvent): ReactNode {
 ### MessageInput
 
 ```typescript
-function MessageInput({ sessionId }: { sessionId: string }) {
+function MessageInput({ sessionId }: { sessionId: SessionId }) {
   const [message, setMessage] = useState("");
 
   const send = async () => {

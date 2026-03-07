@@ -1,9 +1,9 @@
 # ターミナルリレー
 
 サーバー側 PTY 管理、WebSocket バイナリプロトコル、Ring Buffer、クライアント描画。
-terminal: true のプロバイダー（Claude Code, PTY Fallback）で使用。
+terminal モードのプロバイダー（Claude Code, PTY Fallback）で使用。
 
-上流: `agent-provider-interface.md` (terminalStream)、`api-routes.md` (/ws/terminal/:sessionId)
+上流: `agent-provider-interface.md` (TerminalSession, branded types)、`api-routes.md` (/ws/terminal/:sessionId)
 
 ---
 
@@ -54,19 +54,14 @@ class TerminalRelay {
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
   constructor(
-    private session: AgentSession,
-    private sessionId: string,
+    private session: TerminalSession,
+    private sessionId: SessionId,
     ringBufferSize = 1024 * 1024,  // 1MB
   ) {
     this.ringBuffer = new RingBuffer(ringBufferSize);
   }
 
-  /**
-   * PTY 出力の読み取りを開始する。
-   * terminalStream から読み取り、ring buffer に追記し、接続中の WS に転送。
-   */
   async startRelay() {
-    if (!this.session.terminalStream) return;
     this.reader = this.session.terminalStream.getReader();
 
     try {
@@ -87,59 +82,39 @@ class TerminalRelay {
     }
   }
 
-  /**
-   * WS クライアントを追加する。
-   * 接続時に ring buffer の内容を replay。
-   */
   addClient(ws: WebSocket) {
-    // Ring buffer replay
     const buffered = this.ringBuffer.readAll();
     if (buffered.length > 0) {
       ws.sendBinary(buffered);
     }
-
     this.wsClients.add(ws);
   }
 
-  /**
-   * WS クライアントを除去する。
-   * relay は止めない（ring buffer への書き込みは継続）。
-   */
   removeClient(ws: WebSocket) {
     this.wsClients.delete(ws);
   }
 
-  /**
-   * ユーザー入力を PTY に書き込む。
-   */
   handleInput(data: Uint8Array) {
-    this.session.writeTerminal?.(data);
+    this.session.writeTerminal(data);
   }
 
-  /**
-   * ターミナルサイズを変更する。
-   */
   handleResize(cols: number, rows: number) {
-    this.session.resizeTerminal?.(cols, rows);
+    this.session.resizeTerminal(cols, rows);
   }
 
-  /**
-   * セッション終了時にスクロールバックをディスクに保存する。
-   */
   async persistScrollback(path: string) {
     const data = this.ringBuffer.readAll();
     await Bun.write(path, data);
   }
 
-  /**
-   * リソース解放。
-   */
   dispose() {
     this.reader?.cancel();
     this.wsClients.clear();
   }
 }
 ```
+
+**変更点**: `session` の型を `TerminalSession` に限定。`writeTerminal`, `resizeTerminal`, `terminalStream` が型で保証される。optional chaining 不要。
 
 ### RingBuffer
 
@@ -180,11 +155,9 @@ class RingBuffer {
     if (this.size === 0) return new Uint8Array(0);
 
     if (this.size < this.capacity) {
-      // まだ一周していない
       return this.buffer.slice(0, this.size);
     }
 
-    // 一周以上 → writePos から末尾 + 先頭から writePos
     const result = new Uint8Array(this.capacity);
     const tailLen = this.capacity - this.writePos;
     result.set(this.buffer.subarray(this.writePos, this.writePos + tailLen), 0);
@@ -199,10 +172,9 @@ class RingBuffer {
 ## WebSocket ハンドラ
 
 ```typescript
-// src/server/sessions/terminal-ws.ts
 app.ws("/ws/terminal/:sessionId", {
   open(ws) {
-    const sessionId = ws.data.params.sessionId;
+    const sessionId = SessionId(ws.data.params.sessionId);
     const relay = terminalRelays.get(sessionId);
     if (!relay) {
       ws.close(4004, "Session not found or not terminal-capable");
@@ -212,24 +184,22 @@ app.ws("/ws/terminal/:sessionId", {
   },
 
   message(ws, data) {
-    const sessionId = ws.data.params.sessionId;
+    const sessionId = SessionId(ws.data.params.sessionId);
     const relay = terminalRelays.get(sessionId);
     if (!relay) return;
 
     if (typeof data === "string") {
-      // JSON メッセージ（resize）
       const msg = JSON.parse(data);
       if (msg.type === "resize") {
         relay.handleResize(msg.cols, msg.rows);
       }
     } else {
-      // バイナリ（ユーザー入力）
       relay.handleInput(new Uint8Array(data));
     }
   },
 
   close(ws) {
-    const sessionId = ws.data.params.sessionId;
+    const sessionId = SessionId(ws.data.params.sessionId);
     const relay = terminalRelays.get(sessionId);
     relay?.removeClient(ws);
   },
@@ -243,11 +213,7 @@ app.ws("/ws/terminal/:sessionId", {
 ### レンダラー選択
 
 ```typescript
-// S3 実行ビュー
-function TerminalPanel({ sessionId }: { sessionId: string }) {
-  // 1. restty が利用可能か確認（WebGPU サポート）
-  // 2. 不可なら xterm.js にフォールバック
-
+function TerminalPanel({ sessionId }: { sessionId: SessionId }) {
   if (supportsWebGPU()) {
     return <ResttyTerminal sessionId={sessionId} />;
   }
@@ -279,7 +245,6 @@ S3 に戻る
 高速出力時のブラウザ側バックプレッシャー:
 
 ```typescript
-// クライアント側
 const WATERMARK_HIGH = 64 * 1024;  // 64KB
 const WATERMARK_LOW = 16 * 1024;   // 16KB
 
@@ -291,9 +256,6 @@ ws.onmessage = (e) => {
     terminal.write(new Uint8Array(e.data), () => {
       buffered -= e.data.byteLength;
     });
-
-    // Watermark 超過時は WS を一時停止（bufferedAmount で自然に制御される）
-    // ブラウザの WS 実装がバックプレッシャーを処理する
   }
 };
 ```
@@ -321,7 +283,6 @@ S3 で完了済みセッションを開いたとき:
 
 ```typescript
 if (session.status === "done" || session.status === "failed") {
-  // DB の scrollback_path からファイルを読み取り
   if (session.scrollbackPath) {
     const data = await Bun.file(session.scrollbackPath).arrayBuffer();
     // REST で返す or WS で送信

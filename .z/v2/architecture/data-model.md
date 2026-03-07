@@ -5,6 +5,29 @@ SQLite スキーマ、インデックス、マイグレーション、制約。
 
 ---
 
+## TypeScript 型定義（SQL CHECK 制約の source of truth）
+
+SQL の CHECK 制約と 1:1 対応する TypeScript 型。
+branded types は `agent-provider-interface.md` で定義。
+
+```typescript
+// DB enum → TypeScript union literals
+type TaskStatus = "backlog" | "active" | "done";
+type SessionStatus = "pending" | "running" | "waiting_permission" | "done" | "failed";
+type SessionEventType =
+  | "status_changed" | "message" | "tool_use" | "tool_result"
+  | "permission_request" | "permission_response"
+  | "error" | "cost_update" | "context_update";
+type NotificationType =
+  | "permission_required" | "session_done" | "session_failed"
+  | "context_warning" | "session_recovered" | "session_orphaned";
+type NotificationPriority = "critical" | "high" | "normal";
+
+// EventSource, Confidence は agent-provider-interface.md で定義済み
+```
+
+---
+
 ## スキーマ
 
 ### projects
@@ -21,6 +44,7 @@ CREATE TABLE projects (
 **制約:**
 - `path` は UNIQUE。同一リポジトリの重複登録を防止。
 - `id` は ULID（時刻ソート可能 + ランダム）。
+- TypeScript 側では `ProjectId` branded type。
 
 ### tasks
 
@@ -48,6 +72,8 @@ active -> backlog（ユーザーが手動で戻す）
 done -> active（再度作業する場合）
 ```
 
+- TypeScript 側: `id` → `TaskId`, `project_id` → `ProjectId`, `status` → `TaskStatus`
+
 ### sessions
 
 ```sql
@@ -64,7 +90,7 @@ CREATE TABLE sessions (
   -- Context & Summary（product/information-architecture.md で追加）
   context_percent INTEGER CHECK (context_percent BETWEEN 0 AND 100),
   agent_summary TEXT,
-  diff_summary TEXT,  -- JSON: {files: [{path, additions, deletions}], total_additions, total_deletions}
+  diff_summary TEXT,  -- JSON: DiffSummary
 
   -- Timestamps
   started_at TEXT,
@@ -104,6 +130,8 @@ running -> done          (exit code 0)
 running -> failed        (exit code != 0 or エラー)
 pending -> failed        (spawn 失敗)
 ```
+
+- TypeScript 側: `id` → `SessionId`, `task_id` → `TaskId`, `agent_provider` → `ProviderId`, `status` → `SessionStatus`, `status_confidence` → `Confidence`
 
 **同時実行制約:**
 1 タスクにつきアクティブセッション（status IN ('pending', 'running', 'waiting_permission')）は最大 1。
@@ -148,6 +176,8 @@ CREATE INDEX idx_session_events_session_id ON session_events(session_id);
 **Append-only**: INSERT のみ。UPDATE / DELETE はしない。
 **seq**: セッション内の単調増加連番。SessionRunner がインメモリカウンタで管理。
 
+- TypeScript 側: `session_id` → `SessionId`, `type` → `SessionEventType`, `source` → `EventSource`, `confidence` → `Confidence`
+
 ### notifications
 
 ```sql
@@ -172,6 +202,8 @@ CREATE INDEX idx_notifications_session_id ON notifications(session_id);
 ```
 
 **永続化必須**: cmux Issue #963 の教訓。transient notification は許容しない。
+
+- TypeScript 側: `session_id` → `SessionId | null`, `type` → `NotificationType`, `priority` → `NotificationPriority`
 
 ### server_state
 
@@ -223,7 +255,6 @@ CREATE TABLE IF NOT EXISTS migrations (
 - トランザクション内で SQL 実行 + migrations テーブル INSERT
 
 ```typescript
-// db.ts
 function runMigrations(db: Database) {
   const applied = db.query("SELECT id FROM migrations").all().map(r => r.id);
   for (const migration of MIGRATIONS) {
@@ -308,7 +339,7 @@ SELECT COUNT(*) AS count FROM notifications WHERE read = 0;
 ## diff_summary JSON スキーマ
 
 ```typescript
-interface DiffSummary {
+type DiffSummary = {
   files: Array<{
     path: string;
     status: "M" | "A" | "D" | "R";  // Modified, Added, Deleted, Renamed
@@ -317,7 +348,7 @@ interface DiffSummary {
   }>;
   total_additions: number;
   total_deletions: number;
-}
+};
 ```
 
 **生成タイミング**: セッション完了時（exit code 0）に SessionRunner が `git diff --stat` を実行して保存。

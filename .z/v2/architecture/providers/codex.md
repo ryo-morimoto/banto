@@ -3,20 +3,23 @@
 app-server JSON-RPC 2.0 over stdio。フル構造化制御。
 banto の Phase 2 プロバイダー。
 
-上流: `../agent-provider-interface.md`、`../../curation/architecture-decision.md` Section 4
+上流: `../agent-provider-interface.md`（ResumableProvider, StructuredSession, branded types）
 
 ---
 
-## Capabilities
+## Provider 型
 
 ```typescript
-{
-  terminal: false,
-  structuredEvents: true,
-  permissions: true,
+// ResumableProvider & mode: "structured"
+const codexProvider: ResumableProvider = {
+  id: ProviderId("codex"),
+  name: "Codex",
+  mode: "structured",
   resume: true,
-  midSessionControl: true,
-}
+  check: () => { ... },
+  createSession: (config) => { ... },
+  resumeSession: (config) => { ... },
+};
 ```
 
 ---
@@ -24,7 +27,8 @@ banto の Phase 2 プロバイダー。
 ## プロセス起動
 
 ```typescript
-class CodexSession implements AgentSession {
+class CodexSession implements StructuredSession {
+  readonly mode = "structured" as const;
   private process: Subprocess;
   private rpc: JsonRpcClient;
 
@@ -37,14 +41,11 @@ class CodexSession implements AgentSession {
     });
 
     this.rpc = new JsonRpcClient(this.process.stdin, this.process.stdout);
-
-    // イベントリスナー登録
     this.rpc.on("event", this.handleRpcEvent.bind(this));
 
-    // スレッド開始
     await this.rpc.call("turn/start", {
       prompt,
-      model: "codex-1",  // 設定可能に
+      model: "codex-1",
     });
 
     this.emit("status", { status: "running", confidence: "high" });
@@ -100,13 +101,11 @@ class JsonRpcClient extends EventEmitter {
         const msg = JSON.parse(line);
 
         if (msg.id && this.pending.has(msg.id)) {
-          // RPC レスポンス
           const { resolve, reject } = this.pending.get(msg.id)!;
           this.pending.delete(msg.id);
           if (msg.error) reject(msg.error);
           else resolve(msg.result);
         } else if (msg.method) {
-          // サーバーからのイベント通知
           this.emit("event", msg);
         }
       }
@@ -129,7 +128,7 @@ class JsonRpcClient extends EventEmitter {
 | ExecCommandResult | tool_result | `{ tool: "Bash", result, error }` |
 | FileEdit | tool_use | `{ tool: "Edit", args: { file_path, diff } }` |
 | FileRead | tool_use | `{ tool: "Read", args: { file_path } }` |
-| ApprovalRequired | permission_request | `{ requestId, tool, args, description }` |
+| ApprovalRequired | permission_request | `{ requestId: RequestId, tool, args, description }` |
 | TurnComplete | (internal) | ターン完了。exit で処理 |
 | AgentStatus | status (varies) | Running/Completed/Errored |
 | UsageUpdate | cost_update | `{ tokens_in, tokens_out, cost_usd }` |
@@ -143,7 +142,7 @@ private handleRpcEvent(msg: { method: string; params: unknown }) {
         source: "protocol",
         confidence: "high",
         payload: { role: "assistant", content: msg.params.content },
-      });
+      } satisfies MessageEvent);
       break;
 
     case "ApprovalRequired":
@@ -152,12 +151,12 @@ private handleRpcEvent(msg: { method: string; params: unknown }) {
         source: "protocol",
         confidence: "high",
         payload: {
-          requestId: msg.params.id,
+          requestId: RequestId(msg.params.id),
           tool: msg.params.tool,
           args: msg.params.args,
           description: msg.params.description,
         },
-      });
+      } satisfies PermissionRequestEvent);
       this.emit("status", { status: "waiting_permission", confidence: "high" });
       break;
 
@@ -178,7 +177,7 @@ private handleRpcEvent(msg: { method: string; params: unknown }) {
           tokens_out: msg.params.output_tokens,
           cost_usd: msg.params.cost,
         },
-      });
+      } satisfies CostUpdateEvent);
       break;
 
     // ... other events
@@ -191,7 +190,7 @@ private handleRpcEvent(msg: { method: string; params: unknown }) {
 ## 権限応答
 
 ```typescript
-async respondToPermission(requestId: string, decision: PermissionDecision) {
+async respondToPermission(requestId: RequestId, decision: PermissionDecision) {
   if (decision.approved) {
     await this.rpc.call("approval/accept", { id: requestId });
   } else {
@@ -217,13 +216,10 @@ async sendMessage(message: string) {
 ## Resume
 
 ```typescript
-class CodexProvider implements AgentProvider {
-  resumeSession(config: ResumeConfig): AgentSession {
-    const session = new CodexSession(config);
-    // app-server 起動後にスレッド ID で再開
-    session.resumeThreadId = config.agentSessionId;
-    return session;
-  }
+resumeSession(config: ResumeConfig): StructuredSession {
+  const session = new CodexSession(config);
+  session.resumeThreadId = config.agentSessionId;
+  return session;
 }
 
 // CodexSession.start() 内:
@@ -240,11 +236,8 @@ if (this.resumeThreadId) {
 
 ```typescript
 async stop() {
-  // 1. ターンをキャンセル
   await this.rpc.call("turn/cancel", {}).catch(() => {});
-  // 2. プロセスを終了
   this.process.kill("SIGTERM");
-  // 3. 5 秒猶予後に SIGKILL
   setTimeout(() => this.process.kill("SIGKILL"), 5000);
 }
 ```

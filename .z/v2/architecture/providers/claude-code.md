@@ -3,20 +3,23 @@
 PTY 起動、HTTP hooks 統合、MCP 権限制御、resume。
 banto の Phase 1 プロバイダー。
 
-上流: `../agent-provider-interface.md`、`../../curation/architecture-decision.md` Section 4
+上流: `../agent-provider-interface.md`（ResumableProvider, TerminalSession, branded types）
 
 ---
 
-## Capabilities
+## Provider 型
 
 ```typescript
-{
-  terminal: true,
-  structuredEvents: true,
-  permissions: true,
+// ResumableProvider & mode: "terminal"
+const claudeCodeProvider: ResumableProvider = {
+  id: ProviderId("claude-code"),
+  name: "Claude Code",
+  mode: "terminal",
   resume: true,
-  midSessionControl: true,
-}
+  check: () => { ... },
+  createSession: (config) => { ... },
+  resumeSession: (config) => { ... },
+};
 ```
 
 ---
@@ -24,7 +27,8 @@ banto の Phase 1 プロバイダー。
 ## プロセス起動
 
 ```typescript
-class ClaudeCodeSession implements AgentSession {
+class ClaudeCodeSession implements TerminalSession {
+  readonly mode = "terminal" as const;
   private process: Subprocess;
 
   async start(prompt: string) {
@@ -41,12 +45,11 @@ class ClaudeCodeSession implements AgentSession {
     });
 
     // PTY ストリームのセットアップは Bun.Terminal 経由
-    // (具体的 API は Bun のバージョンによる)
   }
 
   private buildArgs(prompt: string): string[] {
     const args = [
-      "--print",  // 非対話モードで出力
+      "--print",
     ];
 
     // Hooks 設定
@@ -61,7 +64,6 @@ class ClaudeCodeSession implements AgentSession {
       args.push("--resume", this.resumeSessionId);
     }
 
-    // プロンプト
     args.push(prompt);
 
     return args;
@@ -82,10 +84,10 @@ private hookConfig() {
   const baseUrl = `http://localhost:${this.serverPort}/api/hooks/claude-code`;
   return {
     hooks: {
-      Notification: [{ type: "http", url: `${baseUrl}?event=notification&session=${this.sessionId}` }],
-      Stop: [{ type: "http", url: `${baseUrl}?event=stop&session=${this.sessionId}` }],
-      PreToolUse: [{ type: "http", url: `${baseUrl}?event=pre_tool_use&session=${this.sessionId}` }],
-      PostToolUse: [{ type: "http", url: `${baseUrl}?event=post_tool_use&session=${this.sessionId}` }],
+      Notification: [{ type: "http", url: `${baseUrl}?event=notification&session=${this.config.sessionId}` }],
+      Stop: [{ type: "http", url: `${baseUrl}?event=stop&session=${this.config.sessionId}` }],
+      PreToolUse: [{ type: "http", url: `${baseUrl}?event=pre_tool_use&session=${this.config.sessionId}` }],
+      PostToolUse: [{ type: "http", url: `${baseUrl}?event=post_tool_use&session=${this.config.sessionId}` }],
     },
   };
 }
@@ -104,21 +106,17 @@ private hookConfig() {
 ### Hook エンドポイント
 
 ```typescript
-// src/server/agents/claude-code/hooks.ts
 app.post("/api/hooks/claude-code", async ({ query, body }) => {
-  const sessionId = query.session;
+  const sessionId = SessionId(query.session);
   const eventType = query.event;
 
   switch (eventType) {
     case "notification":
-      // AgentEvent に変換して SessionRunner に伝播
       this.emitEvent(sessionId, convertNotification(body));
       return { status: "ok" };
 
     case "pre_tool_use":
-      // 基本は approve。auto_approve_rules の照合は SessionRunner 側で行う。
-      // ここでは CC に「実行してよい」と返すだけ。
-      // banto の権限制御は MCP permission-prompt-tool で行う。
+      // banto の権限制御は MCP permission-prompt-tool で行う
       return { decision: "approve" };
 
     case "post_tool_use":
@@ -126,7 +124,6 @@ app.post("/api/hooks/claude-code", async ({ query, body }) => {
       return { status: "ok" };
 
     case "stop":
-      // プロセス終了通知。exit イベントは process.on("exit") で別途捕捉。
       return { status: "ok" };
   }
 });
@@ -141,9 +138,6 @@ app.post("/api/hooks/claude-code", async ({ query, body }) => {
 Claude Code が `--permission-prompt-tool mcp__banto__permission_prompt` で起動されると、権限が必要な操作の前に banto の MCP ツールを呼ぶ。
 
 ```typescript
-// src/server/agents/claude-code/mcp-permission.ts
-
-// MCP サーバーとして登録するツール
 const permissionPromptTool = {
   name: "permission_prompt",
   description: "Request permission from the user for a tool execution",
@@ -153,8 +147,8 @@ const permissionPromptTool = {
     description: { type: "string" },
   },
 
-  async execute({ tool_name, tool_input, description }, { sessionId }) {
-    const requestId = generateId();
+  async execute({ tool_name, tool_input, description }, { sessionId }: { sessionId: SessionId }) {
+    const requestId = RequestId(generateId());
 
     // 1. AgentEvent として emit（SessionRunner が通知生成 + WS push）
     this.emitEvent(sessionId, {
@@ -177,17 +171,17 @@ const permissionPromptTool = {
 
 ```typescript
 class PermissionWaiter {
-  private pending = new Map<string, {
+  private pending = new Map<RequestId, {
     resolve: (d: PermissionDecision) => void;
   }>();
 
-  wait(requestId: string): Promise<PermissionDecision> {
+  wait(requestId: RequestId): Promise<PermissionDecision> {
     return new Promise(resolve => {
       this.pending.set(requestId, { resolve });
     });
   }
 
-  respond(requestId: string, decision: PermissionDecision) {
+  respond(requestId: RequestId, decision: PermissionDecision) {
     const waiter = this.pending.get(requestId);
     if (waiter) {
       waiter.resolve(decision);
@@ -204,8 +198,7 @@ class PermissionWaiter {
 ## Resume
 
 ```typescript
-async resumeSession(config: ResumeConfig): AgentSession {
-  // --resume フラグ付きで起動
+resumeSession(config: TerminalResumeConfig): TerminalSession {
   const session = new ClaudeCodeSession({
     ...config,
     resumeSessionId: config.agentSessionId,
