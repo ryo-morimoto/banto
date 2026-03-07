@@ -104,45 +104,44 @@ GROUP BY session_id;
 | error | error（最新エラーを上書き） |
 
 ```typescript
+// AgentEvent は discriminated union。switch で型が絞られる。
+// キャストは不要。
 private materialize(sessionId: string, event: AgentEvent) {
   switch (event.type) {
     case "permission_request":
+      // event.payload.requestId, .tool, .args が確定
       this.sessionRepo.update(sessionId, {
         status: "waiting_permission",
         status_confidence: event.confidence,
       });
       break;
 
-    case "permission_response":
+    case "cost_update":
+      // event.payload.tokens_in, .tokens_out, .cost_usd が確定
       this.sessionRepo.update(sessionId, {
-        status: "running",
-        status_confidence: "high",
+        tokens_in: event.payload.tokens_in,
+        tokens_out: event.payload.tokens_out,
+        cost_usd: event.payload.cost_usd ?? 0,
       });
       break;
 
-    case "cost_update": {
-      const p = event.payload as { tokens_in: number; tokens_out: number; cost_usd?: number };
+    case "context_update":
+      // event.payload.context_percent が確定
       this.sessionRepo.update(sessionId, {
-        tokens_in: p.tokens_in,
-        tokens_out: p.tokens_out,
-        cost_usd: p.cost_usd ?? 0,
+        context_percent: event.payload.context_percent,
       });
       break;
-    }
 
-    case "context_update": {
-      const p = event.payload as { context_percent: number };
-      this.sessionRepo.update(sessionId, {
-        context_percent: p.context_percent,
-      });
+    case "error":
+      // event.payload.message が確定
+      this.sessionRepo.update(sessionId, { error: event.payload.message });
       break;
-    }
 
-    case "error": {
-      const p = event.payload as { message: string };
-      this.sessionRepo.update(sessionId, { error: p.message });
+    case "message":
+    case "tool_use":
+    case "tool_result":
+      // レジャーに追記するだけ。sessions テーブルは更新しない
       break;
-    }
   }
 }
 ```
@@ -161,22 +160,20 @@ private maybeNotify(sessionId: string, event: AgentEvent) {
   const task = this.taskRepo.get(session.task_id);
 
   switch (event.type) {
-    case "permission_request": {
-      const p = event.payload as { tool: string; args: Record<string, unknown> };
+    case "permission_request":
+      // event.payload.tool, .args が型で確定
       this.notificationService.create({
         session_id: sessionId,
         type: "permission_required",
         priority: "critical",
         title: task.title,
-        body: `${p.tool}(${p.args.file_path ?? ""})`,
+        body: `${event.payload.tool}(${event.payload.args.file_path ?? ""})`,
       });
       break;
-    }
 
-    case "context_update": {
-      const p = event.payload as { context_percent: number };
-      if (p.context_percent >= 90) {
-        // 同セッションで既に context_warning を送信済みなら送らない
+    case "context_update":
+      // event.payload.context_percent が型で確定
+      if (event.payload.context_percent >= 90) {
         const existing = this.notificationRepo.findBySessionAndType(
           sessionId, "context_warning"
         );
@@ -186,12 +183,11 @@ private maybeNotify(sessionId: string, event: AgentEvent) {
             type: "context_warning",
             priority: "high",
             title: task.title,
-            body: `Context usage: ${p.context_percent}%`,
+            body: `Context usage: ${event.payload.context_percent}%`,
           });
         }
       }
       break;
-    }
   }
 }
 ```
