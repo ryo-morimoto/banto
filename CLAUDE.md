@@ -6,7 +6,7 @@ A dashboard to jot down tasks, throw them at an agent, and watch the results. Ru
 
 - Best interface per agent: Use each agent's richest available integration (native protocol > ACP > PTY fallback)
 - ACP as universal fallback: Any ACP-compatible agent is automatically supported
-- 1 session = 1 unit of execution
+- Task = user's unit of work: Sessions are internal. Users think in tasks (goals), not sessions (executions)
 - One view: Active tasks listed by project on a single screen
 - Jot, throw, watch: Task management → agent execution → result review
 - Function over form: Prioritize working features over UI polish
