@@ -1,0 +1,11 @@
+[
+  {
+    "file": "./design/banto-dashboard-redesign.pen",
+    "prompt": "Redesign the banto dashboard UI so it feels deliberate and distinct, not generic. Keep the current product structure (task list sidebar, task detail panel, terminal/session panel) and preserve mobile usability. Create one polished direction with clear typography hierarchy, stronger spacing rhythm, and a coherent color system. Include states for idle, active session, done session, and failed session.",
+    "model": "claude-4.5-sonnet",
+    "attachments": [
+      "./docs/screenshot.png",
+      "./design/pencil-redesign-brief.md"
+    ]
+  }
+]
