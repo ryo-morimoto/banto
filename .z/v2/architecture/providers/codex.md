@@ -1,6 +1,6 @@
 # Codex プロバイダー
 
-app-server JSON-RPC 2.0 over stdio。フル構造化制御。
+app-server JSON-RPC 2.0 over stdio (JSONL)。フル構造化制御。`[experimental]`。
 banto の Phase 2 プロバイダー。
 
 上流: `../agent-provider-interface.md`（ResumableProvider, StructuredSession, branded types）
@@ -41,11 +41,21 @@ class CodexSession implements StructuredSession {
     });
 
     this.rpc = new JsonRpcClient(this.process.stdin, this.process.stdout);
-    this.rpc.on("event", this.handleRpcEvent.bind(this));
+    this.rpc.on("notification", this.handleNotification.bind(this));
+    this.rpc.on("request", this.handleServerRequest.bind(this));
+
+    // 1. Initialize handshake (required before any other method)
+    await this.rpc.call("initialize", {});
+    this.rpc.notify("initialized", {});
+
+    // 2. Start thread + turn
+    await this.rpc.call("thread/start", {
+      cwd: this.config.worktreePath ?? this.config.projectPath,
+    });
 
     await this.rpc.call("turn/start", {
-      prompt,
-      model: "codex-1",
+      input: prompt,
+      threadId: this.threadId,
     });
 
     this.emit("status", { status: "running", confidence: "high" });
@@ -56,6 +66,8 @@ class CodexSession implements StructuredSession {
 ---
 
 ## JSON-RPC 2.0 クライアント
+
+**Wire format note**: Codex app-server omits `"jsonrpc":"2.0"` on the wire. The client must handle messages without this header. JSONL framing (newline-delimited JSON).
 
 ```typescript
 class JsonRpcClient extends EventEmitter {
@@ -83,6 +95,13 @@ class JsonRpcClient extends EventEmitter {
     });
   }
 
+  notify(method: string, params?: unknown): void {
+    const message = JSON.stringify({ jsonrpc: "2.0", method, params });
+    const writer = this.stdin.getWriter();
+    writer.write(new TextEncoder().encode(message + "\n"));
+    writer.releaseLock();
+  }
+
   private async startReading() {
     const reader = this.stdout.getReader();
     const decoder = new TextDecoder();
@@ -100,16 +119,29 @@ class JsonRpcClient extends EventEmitter {
         if (!line.trim()) continue;
         const msg = JSON.parse(line);
 
-        if (msg.id && this.pending.has(msg.id)) {
+        // Response to our request (has id matching a pending call)
+        if (msg.id != null && this.pending.has(msg.id)) {
           const { resolve, reject } = this.pending.get(msg.id)!;
           this.pending.delete(msg.id);
           if (msg.error) reject(msg.error);
           else resolve(msg.result);
+        // Server-initiated request (has id + method, expects response)
+        } else if (msg.id != null && msg.method) {
+          this.emit("request", msg);
+        // Server notification (has method, no id)
         } else if (msg.method) {
-          this.emit("event", msg);
+          this.emit("notification", msg);
         }
       }
     }
+  }
+
+  // Send response to a server-initiated request
+  async respond(id: number, result: unknown): Promise<void> {
+    const message = JSON.stringify({ jsonrpc: "2.0", id, result });
+    const writer = this.stdin.getWriter();
+    await writer.write(new TextEncoder().encode(message + "\n"));
+    writer.releaseLock();
   }
 }
 ```
@@ -120,74 +152,117 @@ class JsonRpcClient extends EventEmitter {
 
 ### Codex app-server イベント → AgentEvent
 
-| Codex イベント | AgentEvent type | payload |
-|---------------|----------------|---------|
-| TurnStarted | (internal) | ターン開始。status: running を emit |
-| Message | message | `{ role: "assistant", content }` |
-| ExecCommand | tool_use | `{ tool: "Bash", args: { command } }` |
-| ExecCommandResult | tool_result | `{ tool: "Bash", result, error }` |
-| FileEdit | tool_use | `{ tool: "Edit", args: { file_path, diff } }` |
-| FileRead | tool_use | `{ tool: "Read", args: { file_path } }` |
-| ApprovalRequired | permission_request | `{ requestId: RequestId, tool, args, description }` |
-| TurnComplete | (internal) | ターン完了。exit で処理 |
-| AgentStatus | status (varies) | Running/Completed/Errored |
-| UsageUpdate | cost_update | `{ tokens_in, tokens_out, cost_usd }` |
+| Codex 通知 | AgentEvent type | payload |
+|-----------|----------------|---------|
+| turn/started | (internal) | ターン開始。status: running を emit |
+| turn/completed | (internal) | ターン完了。status に応じて done/failed |
+| item/agentMessage/delta | message | `{ role: "assistant", content: delta }` |
+| item/commandExecution/outputDelta | tool_result | `{ tool: "Bash", result: delta }` |
+| item/fileChange/outputDelta | tool_result | `{ tool: "Edit", result: delta }` |
+| item/started (type: command) | tool_use | `{ tool: "Bash", args: { command } }` |
+| item/started (type: fileChange) | tool_use | `{ tool: "Edit", args: { file_path } }` |
+| thread/tokenUsage/updated | cost_update | `{ tokens_in, tokens_out }` (no cost field; calculated client-side) |
+| turn/diff/updated | (internal) | diff stats 更新。diff_summary に保存 |
 
 ```typescript
-// Codex RPC メソッド名の discriminated union
-type CodexRpcMethod = "Message" | "ApprovalRequired" | "AgentStatus" | "UsageUpdate"
-  | "ExecCommand" | "ExecCommandResult" | "FileEdit" | "FileRead" | "TurnStarted" | "TurnComplete";
-
-private handleRpcEvent(msg: { method: string; params: unknown }) {
+// Server notifications (no response expected)
+private handleNotification(msg: { method: string; params: unknown }) {
   const handlers = {
-    Message: () => {
+    "turn/started": () => {
+      this.turnId = msg.params.turn.id;
+      this.emit("status", { status: "running", confidence: "high" });
+    },
+    "turn/completed": () => {
+      const status = msg.params.turn.status;
+      if (status === "completed") {
+        this.emit("status", { status: "done", confidence: "high" });
+      } else {
+        this.emit("status", { status: "failed", confidence: "high" });
+      }
+    },
+    "item/agentMessage/delta": () => {
       this.emit("event", {
         type: "message",
         source: "protocol",
         confidence: "high",
-        payload: { role: "assistant", content: msg.params.content },
+        payload: { role: "assistant", content: msg.params.delta },
       } satisfies MessageEvent);
     },
-
-    ApprovalRequired: () => {
-      this.emit("event", {
-        type: "permission_request",
-        source: "protocol",
-        confidence: "high",
-        payload: {
-          requestId: RequestId(msg.params.id),
-          tool: msg.params.tool,
-          args: msg.params.args,
-          description: msg.params.description,
-        },
-      } satisfies PermissionRequestEvent);
-      this.emit("status", { status: "waiting_permission", confidence: "high" });
-    },
-
-    AgentStatus: () => {
-      if (msg.params.status === "Completed") {
-        // プロセス終了はしない（app-server は生き続ける）
-        // banto 側で "done" を設定
-      }
-    },
-
-    UsageUpdate: () => {
+    "thread/tokenUsage/updated": () => {
+      const usage = msg.params.tokenUsage.total;
       this.emit("event", {
         type: "cost_update",
         source: "protocol",
         confidence: "high",
         payload: {
-          tokens_in: msg.params.input_tokens,
-          tokens_out: msg.params.output_tokens,
-          cost_usd: msg.params.cost,
+          tokens_in: usage.inputTokens,
+          tokens_out: usage.outputTokens,
+          cost_usd: 0,  // No cost field; calculate client-side from model pricing
         },
       } satisfies CostUpdateEvent);
+
+      // context_percent from modelContextWindow
+      if (msg.params.tokenUsage.modelContextWindow) {
+        const percent = Math.round(
+          (usage.totalTokens / msg.params.tokenUsage.modelContextWindow) * 100
+        );
+        this.emit("event", {
+          type: "context_update",
+          source: "protocol",
+          confidence: "high",
+          payload: { context_percent: percent },
+        });
+      }
     },
+  } satisfies Partial<Record<string, () => void>>;
 
-    // ... other events
-  } satisfies Partial<Record<CodexRpcMethod, () => void>>;
+  handlers[msg.method]?.();
+}
 
-  handlers[msg.method as keyof typeof handlers]?.();
+// Server-initiated requests (response required)
+private async handleServerRequest(msg: { id: number; method: string; params: unknown }) {
+  const handlers = {
+    "item/commandExecution/requestApproval": async () => {
+      const requestId = RequestId(msg.params.itemId);
+      this.emit("event", {
+        type: "permission_request",
+        source: "protocol",
+        confidence: "high",
+        payload: {
+          requestId,
+          tool: "Bash",
+          args: { command: msg.params.command },
+          description: msg.params.reason,
+        },
+      } satisfies PermissionRequestEvent);
+      this.emit("status", { status: "waiting_permission", confidence: "high" });
+
+      const decision = await this.waitForPermissionResponse(requestId);
+      return { decision: decision.approved ? "accept" : "decline" };
+    },
+    "item/fileChange/requestApproval": async () => {
+      const requestId = RequestId(msg.params.itemId);
+      this.emit("event", {
+        type: "permission_request",
+        source: "protocol",
+        confidence: "high",
+        payload: {
+          requestId,
+          tool: "Write",
+          args: {},
+          description: msg.params.reason,
+        },
+      } satisfies PermissionRequestEvent);
+      this.emit("status", { status: "waiting_permission", confidence: "high" });
+
+      const decision = await this.waitForPermissionResponse(requestId);
+      return { decision: decision.approved ? "accept" : "decline" };
+    },
+  } satisfies Partial<Record<string, () => Promise<unknown>>>;
+
+  const handler = handlers[msg.method];
+  if (handler) return handler();
+  return {};
 }
 ```
 
@@ -195,15 +270,15 @@ private handleRpcEvent(msg: { method: string; params: unknown }) {
 
 ## 権限応答
 
-```typescript
-async respondToPermission(requestId: RequestId, decision: PermissionDecision) {
-  if (decision.approved) {
-    await this.rpc.call("approval/accept", { id: requestId });
-  } else {
-    await this.rpc.call("approval/decline", { id: requestId });
-  }
-}
-```
+Codex の権限モデルは **reverse-direction**: エージェントが `item/commandExecution/requestApproval` や `item/fileChange/requestApproval` をリクエストとして送信し、banto がレスポンスで decision を返す。
+
+Decision の選択肢:
+- `accept`: 今回だけ許可
+- `acceptForSession`: セッション中は許可（auto_approve_rules に相当）
+- `decline`: 拒否
+- `cancel`: ターンをキャンセル
+
+banto の auto_approve_rules に一致する場合は `acceptForSession` を返す。
 
 ---
 
@@ -211,11 +286,15 @@ async respondToPermission(requestId: RequestId, decision: PermissionDecision) {
 
 ```typescript
 async sendMessage(message: string) {
-  await this.rpc.call("turn/start", { prompt: message });
+  await this.rpc.call("turn/steer", {
+    input: message,
+    threadId: this.threadId,
+    expectedTurnId: this.turnId,
+  });
 }
 ```
 
-**注意**: `turn/start` は新しいターンを開始する。前のターンが完了している必要がある。実行中に送信する場合の挙動は要検証（→ validation/）。
+**注意**: `turn/steer` はアクティブなターンにインプットを注入する。`expectedTurnId` は precondition check。ターンがアクティブでない場合は `turn/start` を使う。
 
 ---
 
@@ -230,9 +309,10 @@ resumeSession(config: ResumeConfig): StructuredSession {
 
 // CodexSession.start() 内:
 if (this.resumeThreadId) {
-  await this.rpc.call("thread/resume", { thread_id: this.resumeThreadId });
+  await this.rpc.call("thread/resume", { threadId: this.resumeThreadId });
 } else {
-  await this.rpc.call("turn/start", { prompt });
+  await this.rpc.call("thread/start", { cwd: this.config.worktreePath ?? this.config.projectPath });
+  await this.rpc.call("turn/start", { input: prompt, threadId: this.threadId });
 }
 ```
 
@@ -242,7 +322,10 @@ if (this.resumeThreadId) {
 
 ```typescript
 async stop() {
-  await this.rpc.call("turn/cancel", {}).catch(() => {});
+  await this.rpc.call("turn/interrupt", {
+    threadId: this.threadId,
+    turnId: this.turnId,
+  }).catch(() => {});
   this.process.kill("SIGTERM");
   setTimeout(() => this.process.kill("SIGKILL"), 5000);
 }
@@ -252,6 +335,8 @@ async stop() {
 
 ## app-server 固有の考慮事項
 
-- **プロセスライフサイクル**: app-server はターン間で生き続ける。「セッション完了」= TurnComplete or AgentStatus:Completed であり、プロセス終了ではない。banto 側で明示的にプロセスを kill する。
+- **プロセスライフサイクル**: app-server はターン間で生き続ける。「セッション完了」= turn/completed であり、プロセス終了ではない。banto 側で明示的にプロセスを kill する。
 - **複数ターン**: Codex は 1 セッション内で複数ターンを実行できる。banto では 1 タスク = 1 ターン（最初のプロンプト）を基本とするが、sendMessage() で追加ターンも可能。
-- **コンテキスト使用率**: Codex の app-server が context_percent 相当の情報を提供するかは要検証。UsageUpdate にトークン数はあるが、ウィンドウ上限は不明な場合がある。
+- **コスト計算**: app-server は cost フィールドを提供しない。`thread/tokenUsage/updated` のトークン数とモデル料金テーブルから banto 側で計算する。
+- **コンテキスト使用率**: `thread/tokenUsage/updated` に `modelContextWindow` フィールドがある。totalTokens / modelContextWindow で算出。
+- **型生成**: `codex app-server generate-ts` で TypeScript 型定義を自動生成可能。

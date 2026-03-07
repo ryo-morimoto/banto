@@ -167,6 +167,8 @@ class RingBuffer {
 }
 ```
 
+**PoC 検証**: 1MB で ~34 分 (500 bytes/sec 想定)。Bun.write() は 0.1ms で完了、write-then-rename で crash-safe。
+
 ---
 
 ## WebSocket ハンドラ
@@ -214,12 +216,16 @@ app.ws("/ws/terminal/:sessionId", {
 
 ```typescript
 function TerminalPanel({ sessionId }: { sessionId: SessionId }) {
-  if (supportsWebGPU()) {
-    return <ResttyTerminal sessionId={sessionId} />;
-  }
+  // PoC 検証結果: xterm.js を primary renderer として使用
+  // restty (v0.1.x) は API 安定後にオプションとして追加予定
   return <XtermTerminal sessionId={sessionId} />;
 }
 ```
+
+**レンダラー選択根拠** (PoC 検証済み):
+- **xterm.js**: v6.0.0。VS Code 等で実績あり。Canvas ベースで GPU 不要。全ブラウザ対応。全仮定 (D3, D6, D9) 検証済み
+- **restty**: v0.1.34。libghostty-vt WASM + WebGPU。高品質だが early-stage (API 不安定)。WebGPU 必須 (Chrome 113+, Safari 18+, Firefox 141+)
+- **WebGL addon** (`@xterm/addon-webgl`): xterm.js + GPU 描画。restty なしで高速化可能
 
 ### WebSocket 接続ライフサイクル
 

@@ -1,6 +1,7 @@
 # ACP プロバイダー
 
 ACP (Agent Client Protocol) JSON-RPC 2.0 over stdio。universal fallback。
+28+ エージェント対応。TypeScript SDK (`@agentclientprotocol/sdk`) を使用。
 banto の Phase 3 プロバイダー。
 
 上流: `../agent-provider-interface.md`（AgentProvider discriminated union, StructuredSession, branded types）
@@ -30,11 +31,13 @@ const acpProvider: NonResumableProvider = {
 
 ## ACP 概要
 
-ACP は Zed が策定した "LSP for agents" プロトコル。JSON-RPC 2.0 over stdio。
+ACP は Zed が策定した "LSP for agents" プロトコル。JSON-RPC 2.0 over stdio (newline-delimited JSON)。
 
-- クライアント（banto）がエージェントプロセスを起動し、stdio で通信
-- エージェントがイベントを push し、banto がリクエストを送る
-- 7+ エージェント対応: OpenCode, Gemini CLI, Goose, Kiro, Copilot, etc.
+- 公式サイト: agentclientprotocol.com
+- Protocol version: 1 (単一整数。破壊的変更時のみインクリメント)
+- 28+ エージェント対応: Gemini CLI, OpenCode, Goose, Kiro, Copilot CLI, Cline, Qwen Code, etc.
+- TypeScript SDK: `@agentclientprotocol/sdk` v0.14.1
+- CC/Codex はアダプター経由で ACP 対応（ネイティブではない）
 
 ---
 
@@ -44,7 +47,7 @@ ACP は Zed が策定した "LSP for agents" プロトコル。JSON-RPC 2.0 over
 class AcpSession implements StructuredSession {
   readonly mode = "structured" as const;
   private process: Subprocess;
-  private rpc: JsonRpcClient;  // Codex と同じ JSON-RPC クライアントを共用
+  private connection: ClientSideConnection;  // from @agentclientprotocol/sdk
 
   async start(prompt: string) {
     this.process = Bun.spawn(this.buildCommand(), {
@@ -54,24 +57,35 @@ class AcpSession implements StructuredSession {
       stderr: "pipe",
     });
 
-    this.rpc = new JsonRpcClient(this.process.stdin, this.process.stdout);
-    this.rpc.on("event", this.handleAcpEvent.bind(this));
+    // SDK handles JSON-RPC framing, capability negotiation, message routing
+    this.connection = new ClientSideConnection(
+      this.process.stdin,
+      this.process.stdout,
+    );
 
-    // 1. Initialize（capability ネゴシエーション）
-    const initResult = await this.rpc.call("initialize", {
-      clientInfo: { name: "banto", version: "2.0.0" },
-      capabilities: {
-        permissions: true,
-        contextTracking: true,
+    // Register client-side handlers (agent -> client requests)
+    this.connection.onRequest("session/request_permission", this.handlePermissionRequest.bind(this));
+    this.connection.onNotification("session/update", this.handleSessionUpdate.bind(this));
+
+    // 1. Initialize (capability negotiation)
+    const initResult = await this.connection.initialize({
+      protocolVersion: 1,
+      clientCapabilities: {
+        fs: { readTextFile: true, writeTextFile: false },
       },
+      clientInfo: { name: "banto", version: "2.0.0" },
     });
 
-    // agent が宣言した capabilities を記録
-    this.agentCapabilities = initResult.capabilities;
+    this.agentCapabilities = initResult.agentCapabilities;
 
-    // 2. メッセージ送信
-    await this.rpc.call("message/send", {
-      content: prompt,
+    // 2. Create session
+    const session = await this.connection.request("session/new", {});
+    this.acpSessionId = session.sessionId;
+
+    // 3. Send prompt
+    await this.connection.request("session/prompt", {
+      sessionId: this.acpSessionId,
+      parts: [{ type: "text", text: prompt }],
     });
 
     this.emit("status", { status: "running", confidence: "high" });
@@ -89,58 +103,50 @@ class AcpSession implements StructuredSession {
 
 ACP のイベントは標準化されているため、エージェントに依存しない変換が可能。
 
-| ACP イベント | AgentEvent type | payload |
-|-------------|----------------|---------|
-| message/created | message | `{ role, content }` |
-| tool/called | tool_use | `{ tool, args }` |
-| tool/result | tool_result | `{ tool, result, error }` |
-| permission/requested | permission_request | `{ requestId: RequestId, tool, args, description }` |
-| status/changed | status | `{ status, confidence: "high" }` |
-| usage/updated | cost_update | `{ tokens_in, tokens_out, cost_usd }` |
-| context/updated | context_update | `{ context_percent }` |
-| error | error | `{ message, code }` |
-| completed | (exit handling) | セッション完了 |
+| ACP メソッド | 方向 | AgentEvent type | payload |
+|-------------|------|----------------|---------|
+| session/update (agent_message_chunk) | notification | message | `{ role: "assistant", content: chunk }` |
+| session/update (tool_call) | notification | tool_use | `{ tool, args }` (status: pending→in_progress→completed) |
+| session/update (tool_call_update) | notification | tool_result | `{ tool, result }` |
+| session/request_permission | request | permission_request | `{ requestId, tool, args, options }` |
+| session/prompt response | response | (internal) | `{ stopReason }` (end_turn/cancelled/etc.) |
+
+**注意**: ACP には `context/updated` と `usage/updated` がない。トークン/コスト追跡は agent 固有の extNotification に依存（標準化されていない）。
 
 ```typescript
-private handleAcpEvent(msg: { method: string; params: unknown }) {
-  const eventMap: Record<string, () => AgentEvent | null> = {
-    "message/created": () => ({
-      type: "message",
-      source: "protocol",
-      confidence: "high",
-      payload: { role: msg.params.role, content: msg.params.content },
-    }) satisfies MessageEvent,
+private handleSessionUpdate(params: { sessionId: string; update: AcpUpdate }) {
+  const update = params.update;
 
-    "tool/called": () => ({
-      type: "tool_use",
-      source: "protocol",
-      confidence: "high",
-      payload: { tool: msg.params.name, args: msg.params.arguments },
-    }) satisfies ToolUseEvent,
-
-    "permission/requested": () => {
-      this.emit("status", { status: "waiting_permission", confidence: "high" });
-      return {
-        type: "permission_request",
+  const handlers: Record<string, () => void> = {
+    agent_message_chunk: () => {
+      this.emit("event", {
+        type: "message",
         source: "protocol",
         confidence: "high",
-        payload: {
-          requestId: RequestId(msg.params.id),
-          tool: msg.params.tool,
-          args: msg.params.arguments,
-          description: msg.params.reason,
-        },
-      } satisfies PermissionRequestEvent;
+        payload: { role: "assistant", content: update.chunk },
+      });
     },
-
-    // ... etc
+    tool_call: () => {
+      if (update.status === "pending") {
+        this.emit("event", {
+          type: "tool_use",
+          source: "protocol",
+          confidence: "high",
+          payload: { tool: update.toolName, args: update.input },
+        });
+      }
+    },
+    tool_call_update: () => {
+      this.emit("event", {
+        type: "tool_result",
+        source: "protocol",
+        confidence: "high",
+        payload: { tool: update.toolName, result: update.output },
+      });
+    },
   };
 
-  const converter = eventMap[msg.method];
-  if (converter) {
-    const event = converter();
-    if (event) this.emit("event", event);
-  }
+  handlers[update.type]?.();
 }
 ```
 
@@ -148,12 +154,34 @@ private handleAcpEvent(msg: { method: string; params: unknown }) {
 
 ## 権限応答
 
+Permission is handled as a JSON-RPC response to `session/request_permission` (request-response pattern, not a separate RPC call).
+
 ```typescript
-async respondToPermission(requestId: RequestId, decision: PermissionDecision) {
-  await this.rpc.call("permission/respond", {
-    id: requestId,
-    approved: decision.approved,
+private async handlePermissionRequest(params: {
+  sessionId: string;
+  toolCall: unknown;
+  options: Array<{ optionId: string; name: string; kind: string }>;
+}) {
+  const requestId = RequestId(generateId());
+  this.emit("event", {
+    type: "permission_request",
+    source: "protocol",
+    confidence: "high",
+    payload: {
+      requestId,
+      tool: params.toolCall.name,
+      args: params.toolCall.input,
+      description: params.toolCall.name,
+    },
   });
+  this.emit("status", { status: "waiting_permission", confidence: "high" });
+
+  const decision = await this.waitForPermissionResponse(requestId);
+  const optionId = decision.approved
+    ? params.options.find(o => o.kind === "allow_once")?.optionId
+    : params.options.find(o => o.kind === "reject_once")?.optionId;
+
+  return { outcome: { outcome: "selected", optionId } };
 }
 ```
 
@@ -163,7 +191,10 @@ async respondToPermission(requestId: RequestId, decision: PermissionDecision) {
 
 ```typescript
 async sendMessage(message: string) {
-  await this.rpc.call("message/send", { content: message });
+  await this.connection.request("session/prompt", {
+    sessionId: this.acpSessionId,
+    parts: [{ type: "text", text: message }],
+  });
 }
 ```
 
@@ -171,9 +202,11 @@ async sendMessage(message: string) {
 
 ## 停止
 
+ACP には `shutdown` RPC は存在しない。`session/cancel` notification + SIGTERM で停止。
+
 ```typescript
 async stop() {
-  await this.rpc.call("shutdown", {}).catch(() => {});
+  this.connection.notify("session/cancel", { sessionId: this.acpSessionId });
   this.process.kill("SIGTERM");
   setTimeout(() => this.process.kill("SIGKILL"), 5000);
 }
@@ -217,14 +250,12 @@ async check(): Promise<string | null> {
 
 ---
 
-## ACP 仕様の不確実性
+## ACP 仕様の検証状況
 
-ACP は 2026 年初頭時点でまだ発展中。以下は要検証（→ validation/）:
-
-| 項目 | 不確実性 | フォールバック |
-|------|---------|-------------|
-| initialize の capabilities 仕様 | 標準化途上 | 最小限の capabilities を仮定 |
-| context/updated イベントの有無 | エージェント依存 | なければ context_percent = null |
-| resume 対応 | エージェント依存 | なければ resume = false |
-| 複数ターンの挙動 | エージェント依存 | message/send の応答を待つ |
-| エラーコードの標準化 | 途上 | 汎用エラーハンドリング |
+| 項目 | 状態 | 対策 |
+|------|------|------|
+| initialize の capabilities 仕様 | 検証済み | `agentCapabilities` で resume/loadSession/promptCapabilities を確認 |
+| context/updated イベント | 仕様に存在しない | extNotification で agent 固有に対応。context_percent = null が基本 |
+| resume 対応 | `sessionCapabilities.resume` で判定 | 対応エージェントのみ。`session/resume` (unstable) を使用 |
+| 複数ターンの挙動 | `session/prompt` で追加ターン | 前ターン完了後に送信 |
+| トークン/コスト追跡 | 標準化されていない | extNotification の `thread/tokenUsage/updated` を試行的に listen |

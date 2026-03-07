@@ -97,7 +97,7 @@ session.status が done のときのみ表示。
 | StatusBar                                    |
 +---------------------------------------------+
 | TerminalPanel                                |
-|   (restty or xterm.js)                       |
+|   (xterm.js primary / restty optional)       |
 |   - PTY バイトストリーム描画                   |
 |   - キーボード入力 → WS binary → PTY write    |
 +---------------------------------------------+
