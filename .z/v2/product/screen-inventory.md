@@ -13,7 +13,7 @@
 | 「要対応」が最上部 | 権限待ち/失敗が埋もれると放置される。cmux notification rings |
 | ステータスは色で、詳細はテキストで | 色ドット（green/orange/red）で瞬間認識、テキストラベルで確認 |
 | モバイルは「監視と承認」、フル操作はデスクトップ | ターミナル操作はスマホで非現実的。happy-coder, agentos の教訓 |
-| 実行画面は provider capability で分岐 | terminal:true → ターミナル、false → 構造化会話。architecture-decision D2 |
+| 実行画面は provider.mode で分岐 | mode: "terminal" → ターミナル、"structured" → 構造化会話。architecture-decision D2 |
 | コンテキスト使用率をカードに表示 | 「次にどこを見るべきか」の最良予測指標。marc-nuri |
 | 2 モード設計（board + workspace）を避ける | Vibe Kanban, Nimbalyst で失敗。展開/ドリルダウンで代替。ui-ux-design-patterns |
 | タスク = ユーザーの操作単位 | ユーザーの関心は「目的が達成されたか」。実行回数は内部概念。5why 分析 |
@@ -234,7 +234,7 @@ banto の中核。「3 秒で全状況把握」を実現する画面。
 
 ## S3: 実行ビュー
 
-実行中のタスクを「開いた」ときの画面。provider の capability で **2 つのモード**に分岐する。共通部分（ステータスバー + タイムライン）は同じ。
+実行中のタスクを「開いた」ときの画面。`provider.mode` で **2 つのモード**に分岐する。共通部分（ステータスバー + タイムライン）は同じ。
 
 ### 共通ヘッダー + ステータスバー
 
@@ -248,7 +248,7 @@ banto の中核。「3 秒で全状況把握」を実現する画面。
 
 ステータスバー要素: エージェント名 / ブランチ / 経過時間 / トークン / コスト推計 / ctx %
 
-### モード A: ターミナルビュー（terminal: true）
+### モード A: ターミナルビュー（mode: "terminal"）
 
 Claude Code (PTY), PTY fallback 用。
 
@@ -285,7 +285,7 @@ Claude Code (PTY), PTY fallback 用。
 - キーボード入力でエージェントへ送信可能（IN2: mid-session control）
 - スクロールバック対応（ring buffer → 再接続で replay）
 
-### モード B: 構造化ビュー（terminal: false）
+### モード B: 構造化ビュー（mode: "structured"）
 
 Codex (app-server), ACP 用。
 
@@ -384,13 +384,12 @@ Codex (app-server), ACP 用。
 
 | フィールド | 必須 | 説明 |
 |-----------|------|------|
-| エージェント | yes | 利用可能なプロバイダー一覧。各エージェントの capability アイコン付き |
+| エージェント | yes | 利用可能なプロバイダー一覧。各エージェントの mode + capability アイコン付き |
 
-プロンプトはタスクのタイトル + 説明から自動構成。エージェント一覧に capability 表示:
-- terminal
-- structuredEvents
-- permissions
-- resume
+プロンプトはタスクのタイトル + 説明から自動構成。エージェント一覧に表示:
+- mode: `terminal` | `structured`
+- resume: `true` | `false`
+- permissions: `true` | `false`
 
 ---
 
@@ -465,8 +464,8 @@ S1 ダッシュボード
 +-- タスクカードタップ → S2 タスク詳細
 |   +-- [> Start] → S5 実行開始 → S3 実行ビュー
 |   +-- [Open] → S3 実行ビュー
-|   |   +-- ターミナルモード（terminal:true）
-|   |   +-- 構造化ビューモード（terminal:false）
+|   |   +-- ターミナルモード（mode: "terminal"）
+|   |   +-- 構造化ビューモード（mode: "structured"）
 |   +-- [Retry] → S5 → S3
 |   +-- [Resume] → S3
 |   +-- [Approve]/[Deny] → S7

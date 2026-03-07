@@ -59,7 +59,7 @@
 
 ユーザーが実行ビュー（S3）を開いている間のリアルタイムデータフロー。
 
-### terminal: true（CC PTY + hooks）
+### mode: "terminal"（CC PTY + hooks）
 
 ```
 エージェント                   banto                         ユーザー
@@ -86,7 +86,7 @@
   |                            |                              | タイムライン: @ Edit(file) +N -M
 ```
 
-### terminal: false（Codex app-server / ACP）
+### mode: "structured"（Codex app-server / ACP）
 
 ```
 エージェント                   banto                         ユーザー
@@ -214,7 +214,7 @@
 > "You must explicitly stop the task to give instructions" -- OpenHands の制限
 > "I wanted the code to look a certain way, but it kept pulling back" -- daxfohl, HN (agent drift)
 
-### terminal: true（PTY 入力）
+### mode: "terminal"（PTY 入力）
 
 ```
 ユーザー                      banto                         エージェント
@@ -231,7 +231,7 @@
   |                            |                              | 方針を修正して続行
 ```
 
-### terminal: false（構造化メッセージ）
+### mode: "structured"（構造化メッセージ）
 
 ```
 ユーザー                      banto                         エージェント

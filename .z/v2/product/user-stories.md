@@ -60,7 +60,7 @@
 
 | ID | ストーリー | 動機 | 受け入れ基準 | 優先度 | 出典 |
 |----|----------|------|------------|--------|------|
-| MO1 | エージェントの生出力をリアルタイムで見たい | 何をやっているか分からないと不安。ターミナル出力を見ることで「大丈夫」と判断する | WHEN 実行中のタスクを開く THEN PTY 出力がリアルタイムでターミナルパネルに表示される（terminal:true の場合） | P0 | marc-nuri (terminal relay), learnings-cross-cutting |
+| MO1 | エージェントの生出力をリアルタイムで見たい | 何をやっているか分からないと不安。ターミナル出力を見ることで「大丈夫」と判断する | WHEN 実行中のタスクを開く THEN PTY 出力がリアルタイムでターミナルパネルに表示される（mode: "terminal" の場合） | P0 | marc-nuri (terminal relay), learnings-cross-cutting |
 | MO2 | 構造化されたイベントログで経過を追いたい | ターミナルがないプロバイダーでも「今何してる」を知りたい。ツール使用、ファイル変更、エラーが時系列で見えるとよい | WHEN 実行中のタスクを開く THEN タイムラインにイベント（ツール使用、メッセージ、状態変化）が表示される | P0 | codex-cli (structured events), architecture-decision (dual-mode) |
 | MO6 | エージェントが今どのファイルを触っているか知りたい | 完了まで待ってから diff を見るのではなく、リアルタイムで方向性を判断したい。black box は不安 | WHEN エージェントがファイル操作する THEN タイムラインにリアルタイムでファイルパスとアクション種別が表示される | P1 | user-workflows-multi-agent ("black box forcing users to wait", jarjoura CTO) |
 | MO3 | 何かあったら通知が来てほしい | 画面を見ていない間も、権限待ち・完了・失敗を知りたい。特に権限待ちは即座に知りたい | WHEN タスクが完了/失敗/権限待ちになる THEN Push 通知が届く | P1 | happy-coder, cmux (notification rings), learnings-cross-cutting |
