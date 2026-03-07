@@ -10,8 +10,11 @@ S3 実行ビューの中核設計。
 ## モード決定
 
 ```typescript
-// provider.mode で分岐。discriminated union により型安全
-const mode: "terminal" | "structured" = session.provider.mode;
+// provider.mode で分岐。matchOn で網羅性保証
+const MainPanel = matchOn("mode", session.provider, {
+  terminal:   () => <TerminalPanel sessionId={sessionId} />,
+  structured: () => <ConversationPanel sessionId={sessionId} />,
+});
 ```
 
 | mode | 適用プロバイダー | S3 メインパネル |
@@ -149,33 +152,26 @@ session_events を type に応じて異なるコンポーネントで描画:
 
 ```typescript
 function renderEvent(event: AgentEvent): ReactNode {
-  switch (event.type) {
-    case "message":
-      return <MessageBubble role={event.payload.role} content={event.payload.content} />;
+  return matchOn("type", event, {
+    message:            (e) => <MessageBubble role={e.payload.role} content={e.payload.content} />,
+    tool_use:           (e) => renderToolUse(e.payload.tool, e.payload.args),
+    tool_result:        (e) => <ToolResultBlock tool={e.payload.tool} result={e.payload.result} error={e.payload.error} />,
+    permission_request: (e) => <PermissionCard requestId={e.payload.requestId} tool={e.payload.tool} args={e.payload.args} />,
+    error:              (e) => <ErrorBlock message={e.payload.message} />,
+    cost_update:        () => null,     // ConversationPanel には表示しない
+    context_update:     () => null,
+  });
+}
 
-    case "tool_use": {
-      const { tool, args } = event.payload;
-      if (tool === "Read") return <FileReadBlock path={args.file_path} />;
-      if (tool === "Edit") return <DiffBlock path={args.file_path} diff={args.diff} />;
-      if (tool === "Bash") return <CommandBlock command={args.command} />;
-      return <ToolUseBlock tool={tool} args={args} />;
-    }
-
-    case "tool_result":
-      return <ToolResultBlock tool={event.payload.tool} result={event.payload.result} error={event.payload.error} />;
-
-    case "permission_request":
-      // event.payload.requestId は RequestId 型
-      return <PermissionCard requestId={event.payload.requestId} tool={event.payload.tool} args={event.payload.args} />;
-
-    case "error":
-      return <ErrorBlock message={event.payload.message} />;
-
-    default:
-      return null;  // cost_update, context_update は ConversationPanel には表示しない
-  }
+function renderToolUse(tool: string, args: ToolUseEvent["payload"]["args"]): ReactNode {
+  if (tool === "Read") return <FileReadBlock path={args.file_path} />;
+  if (tool === "Edit") return <DiffBlock path={args.file_path} diff={args.diff} />;
+  if (tool === "Bash") return <CommandBlock command={args.command} />;
+  return <ToolUseBlock tool={tool} args={args} />;
 }
 ```
+
+**網羅性**: 新しい AgentEvent variant を追加すると `matchOn` のハンドラキーが不足してコンパイルエラー。`default: return null` で暗黙に握りつぶさない。
 
 ### MessageInput
 

@@ -12,6 +12,7 @@ AgentProvider / AgentSession の型定義、メソッド契約、イベント分
 1. **Discriminated union**: 消費者は自分に関係ない capability を知る必要がない
 2. **Branded types**: `string` はドメインの意図を喪失する。ID は branded type で取り違えをコンパイル時に検出
 3. **`type` デフォルト**: `interface` は declaration merging で外部から拡張される。sealed な型は `type` で定義。`interface` は意図的拡張点（EventEmitter 等の外部契約）のみ
+4. **Exhaustive match**: discriminated union の分岐は `matchOn` ヘルパー（式）または `switch` + `assertNever`（文）で網羅性を保証。ts-pattern 等の外部依存は不要
 
 ---
 
@@ -51,6 +52,51 @@ declare function getSession(id: SessionId): Session;
 const tid = TaskId("task-123");
 getSession(tid);  // Compile error: TaskId is not assignable to SessionId
 ```
+
+---
+
+## Exhaustive Match Utilities
+
+discriminated union の分岐を式として書くためのヘルパー。依存ゼロ、ランタイムコストゼロ（オブジェクトプロパティ参照のみ）。
+
+### matchOn — 汎用 discriminated union matcher
+
+```typescript
+// shared/match.ts
+
+/** Union から discriminant K の値が V である variant を抽出する */
+type Variant<T, K extends keyof T, V extends T[K]> =
+  T extends Record<K, V> ? T : never;
+
+/** discriminant K を持つ union T の全 variant を網羅するハンドラマップ */
+function matchOn<T extends Record<K, string>, K extends keyof T, R>(
+  key: K,
+  value: T,
+  handlers: { [V in T[K] & string]: (variant: Variant<T, K, V>) => R },
+): R {
+  const handler = handlers[value[key] as T[K] & string];
+  return handler(value as any);
+}
+```
+
+**網羅性保証**: ハンドラオブジェクトのキーは union の全 variant を要求する。キーが欠けるとコンパイルエラー。
+
+### assertNever — switch 文用の exhaustive guard
+
+```typescript
+// shared/assert.ts
+function assertNever(value: never, message?: string): never {
+  throw new Error(message ?? `Unexpected value: ${JSON.stringify(value)}`);
+}
+```
+
+### 使い分け
+
+| パターン | 用途 | 例 |
+|---------|------|-----|
+| `matchOn` | 値を返す式。短いハンドラ | UI のモード分岐、ラベル取得 |
+| `switch` + `assertNever` | 副作用を伴う文。複雑なロジック | event-system の materialize |
+| `satisfies Record<T, V>` | 静的マッピング（関数不要） | ステータスラベル、色マップ |
 
 ---
 
@@ -124,20 +170,18 @@ type StructuredSession = BaseSession & {
 
 ### 権限応答の解決
 
-terminal モードでも CC は MCP 経由で権限制御できる。これを型でどう表現するか:
+terminal モードでも CC は MCP 経由で権限制御できる。`matchOn` で式として分岐:
 
 ```typescript
 function handlePermissionResponse(session: AgentSession, requestId: RequestId, decision: PermissionDecision) {
-  switch (session.mode) {
-    case "structured":
-      session.respondToPermission(requestId, decision);
-      break;
-    case "terminal":
-      permissionHandlers.get(session.provider.id)?.(requestId, decision);
-      break;
-  }
+  matchOn("mode", session, {
+    structured: (s) => s.respondToPermission(requestId, decision),
+    terminal: (s) => permissionHandlers.get(s.provider.id)?.(requestId, decision),
+  });
 }
 ```
+
+**switch 版との比較**: `matchOn` は variant ごとに型が絞られる（`s` は `StructuredSession` / `TerminalSession`）。`break` 忘れもない。新しい mode variant を追加するとハンドラのキー不足でコンパイルエラー。
 
 ---
 
@@ -245,24 +289,38 @@ type ErrorEvent = {
 
 **`Record<string, unknown>` の排除**: PermissionRequestEvent の `args` は以前 `Record<string, unknown>` だったが、ToolUseEvent と同じ index signature パターンに統一。既知のキー（file_path, command）は型で明示し、未知のキーは index signature で許容。
 
-**使用例（型安全な switch）:**
+**使用例 — matchOn（値を返す式）:**
 
 ```typescript
+// イベントの 1 行サマリを生成
+function summarize(event: AgentEvent): string {
+  return matchOn("type", event, {
+    message:            (e) => `${e.payload.role}: ${e.payload.content.slice(0, 80)}`,
+    tool_use:           (e) => `${e.payload.tool}(${e.payload.args.file_path ?? ""})`,
+    tool_result:        (e) => `${e.payload.tool} → ${e.payload.error ?? "ok"}`,
+    permission_request: (e) => `Permission: ${e.payload.tool}`,
+    cost_update:        (e) => `${e.payload.tokens_in} in / ${e.payload.tokens_out} out`,
+    context_update:     (e) => `ctx ${e.payload.context_percent}%`,
+    error:              (e) => e.payload.message,
+  });
+}
+```
+
+**使用例 — switch + assertNever（副作用を伴う文）:**
+
+```typescript
+// materialize のような複雑な分岐は switch が読みやすい
 function handleEvent(event: AgentEvent) {
   switch (event.type) {
     case "message":
-      // event.payload.role と event.payload.content が確定
       console.log(`${event.payload.role}: ${event.payload.content}`);
       break;
-    case "tool_use":
-      // event.payload.tool と event.payload.args が確定
-      console.log(`Tool: ${event.payload.tool}`);
-      break;
     case "permission_request":
-      // event.payload.requestId が RequestId 型で確定
       showPermissionUI(event.payload.requestId, event.payload.tool);
       break;
-    // ... exhaustive check: 未処理の type があればコンパイルエラー
+    // ... 全 case を列挙
+    default:
+      assertNever(event);  // 新 variant 追加時にコンパイルエラー
   }
 }
 ```
@@ -307,17 +365,22 @@ type NonResumableProvider = BaseProvider & {
 **使用例:**
 
 ```typescript
+// resume 判定（boolean discriminant — if で十分）
 if (provider.resume) {
-  // provider.resumeSession が存在することが型で保証される
   showResumeButton();
 }
 
-switch (provider.mode) {
-  case "terminal":
-    return <TerminalView />;
-  case "structured":
-    return <StructuredView />;
-}
+// mode 分岐 — matchOn で式として
+const view = matchOn("mode", provider, {
+  terminal:   () => <TerminalView />,
+  structured: () => <StructuredView />,
+});
+
+// 静的マッピング — satisfies で網羅性チェック
+const MODE_LABEL = {
+  terminal: "Terminal",
+  structured: "Structured",
+} satisfies Record<AgentProvider["mode"], string>;
 ```
 
 ---

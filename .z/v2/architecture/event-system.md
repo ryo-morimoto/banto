@@ -104,8 +104,8 @@ GROUP BY session_id;
 | error | error（最新エラーを上書き） |
 
 ```typescript
-// AgentEvent は discriminated union。switch で型が絞られる。
-// キャストは不要。
+// 副作用ベースの複雑な分岐 → switch + assertNever が適切。
+// matchOn は値を返す式向き。materialize は各 case で DB 更新するため switch。
 private materialize(sessionId: SessionId, event: AgentEvent) {
   switch (event.type) {
     case "permission_request":
