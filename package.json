@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "bun run --hot src/server.ts",
     "build": "bun build --compile --minify-whitespace --minify-syntax --target bun --outfile server src/server.ts",
+    "design:pencil": "pencil --agent-config design/pencil-agent-config.json",
     "test": "bun test",
     "test:ime:fast": "bun test src/client/sessions/ime-controller.test.ts src/client/sessions/terminal-input-bridge.test.ts",
     "test:ime:full": "bun run test:ime:fast && bunx playwright test e2e/ime-smoke.spec.ts e2e/ime-smoke.chromium-cdp.spec.ts",
