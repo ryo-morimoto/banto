@@ -10,11 +10,11 @@ S3 実行ビューの中核設計。
 ## モード決定
 
 ```typescript
-// provider.mode で分岐。matchOn で網羅性保証
-const MainPanel = matchOn("mode", session.provider, {
-  terminal:   () => <TerminalPanel sessionId={sessionId} />,
-  structured: () => <ConversationPanel sessionId={sessionId} />,
-});
+// provider.mode で分岐。match builder で網羅性保証
+const MainPanel = match("mode", session.provider)
+  .case("terminal",   () => <TerminalPanel sessionId={sessionId} />)
+  .case("structured", () => <ConversationPanel sessionId={sessionId} />)
+  .exhaustive();
 ```
 
 | mode | 適用プロバイダー | S3 メインパネル |
@@ -152,15 +152,15 @@ session_events を type に応じて異なるコンポーネントで描画:
 
 ```typescript
 function renderEvent(event: AgentEvent): ReactNode {
-  return matchOn("type", event, {
-    message:            (e) => <MessageBubble role={e.payload.role} content={e.payload.content} />,
-    tool_use:           (e) => renderToolUse(e.payload.tool, e.payload.args),
-    tool_result:        (e) => <ToolResultBlock tool={e.payload.tool} result={e.payload.result} error={e.payload.error} />,
-    permission_request: (e) => <PermissionCard requestId={e.payload.requestId} tool={e.payload.tool} args={e.payload.args} />,
-    error:              (e) => <ErrorBlock message={e.payload.message} />,
-    cost_update:        () => null,     // ConversationPanel には表示しない
-    context_update:     () => null,
-  });
+  return match("type", event)
+    .case("message",            (e) => <MessageBubble role={e.payload.role} content={e.payload.content} />)
+    .case("tool_use",           (e) => renderToolUse(e.payload.tool, e.payload.args))
+    .case("tool_result",        (e) => <ToolResultBlock tool={e.payload.tool} result={e.payload.result} error={e.payload.error} />)
+    .case("permission_request", (e) => <PermissionCard requestId={e.payload.requestId} tool={e.payload.tool} args={e.payload.args} />)
+    .case("error",              (e) => <ErrorBlock message={e.payload.message} />)
+    .case("cost_update",        () => null)
+    .case("context_update",     () => null)
+    .exhaustive();
 }
 
 function renderToolUse(tool: string, args: ToolUseEvent["payload"]["args"]): ReactNode {
@@ -171,7 +171,7 @@ function renderToolUse(tool: string, args: ToolUseEvent["payload"]["args"]): Rea
 }
 ```
 
-**網羅性**: 新しい AgentEvent variant を追加すると `matchOn` のハンドラキーが不足してコンパイルエラー。`default: return null` で暗黙に握りつぶさない。
+**網羅性**: 新しい AgentEvent variant を追加すると `.exhaustive()` がコンパイルエラー。`default: return null` で暗黙に握りつぶさない。
 
 ### MessageInput
 

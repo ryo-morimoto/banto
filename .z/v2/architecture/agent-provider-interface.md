@@ -55,31 +55,74 @@ getSession(tid);  // Compile error: TaskId is not assignable to SessionId
 
 ---
 
-## Exhaustive Match Utilities
+## Exhaustive Match
 
-discriminated union の分岐を式として書くためのヘルパー。依存ゼロ、ランタイムコストゼロ（オブジェクトプロパティ参照のみ）。
+discriminated union の分岐を式として書くためのユーティリティ。
+ts-pattern のアーキテクチャを参考に、banto に必要な部分だけ 25 行で再現。
 
-### matchOn — 汎用 discriminated union matcher
+**設計原則（ts-pattern と同じ）:**
+- **型レイヤーとランタイムレイヤーを分離する**。型は `Remaining` generic で網羅性を追跡。ランタイムは単純な分岐。
+- **接合点に 1 箇所だけ `as any`**。ts-pattern, Zod, Effect すべて同じ手法。ユーザーからは見えない。
+- **`[Remaining] extends [never]` で網羅性をゲート**。残りが `never` なら呼べる。残っていたらコンパイルエラー。
+
+### match — builder 式 matcher
 
 ```typescript
 // shared/match.ts
 
-/** Union から discriminant K の値が V である variant を抽出する */
-type Variant<T, K extends keyof T, V extends T[K]> =
-  T extends Record<K, V> ? T : never;
+// === 型レイヤー ===
 
-/** discriminant K を持つ union T の全 variant を網羅するハンドラマップ */
-function matchOn<T extends Record<K, string>, K extends keyof T, R>(
+type Cases<T, K extends keyof T, Remaining, R> = {
+  /** variant を 1 つ処理する。Remaining から除外される */
+  case<
+    V extends Remaining extends Record<K, infer M extends string> ? M : never,
+    R2,
+  >(
+    value: V,
+    handler: (variant: Extract<T, Record<K, V>>) => R2,
+  ): Cases<T, K, Exclude<Remaining, Record<K, V>>, R | R2>;
+
+  /** 全 variant が処理済みなら値を返す。未処理があればコンパイルエラー */
+  exhaustive: [Remaining] extends [never]
+    ? () => R
+    : NonExhaustiveError<Remaining>;
+};
+
+type NonExhaustiveError<Remaining> = {
+  readonly error: "Non-exhaustive match";
+  readonly remaining: Remaining;
+};
+
+// === ランタイムレイヤー（untyped — ts-pattern と同じ手法） ===
+
+class MatchExpr {
+  private result: { matched: false } | { matched: true; value: unknown } = { matched: false };
+  constructor(private key: string, private input: unknown) {}
+
+  case(tag: string, handler: (v: unknown) => unknown): this {
+    if (!this.result.matched && (this.input as any)[this.key] === tag) {
+      this.result = { matched: true, value: handler(this.input) };
+    }
+    return this;
+  }
+
+  exhaustive(): unknown {
+    if (!this.result.matched) {
+      throw new Error(`Non-exhaustive match: unhandled ${(this.input as any)[this.key]}`);
+    }
+    return this.result.value;
+  }
+}
+
+// === 接合点（唯一の as any） ===
+
+function match<T extends Record<K, string>, K extends keyof T>(
   key: K,
   value: T,
-  handlers: { [V in T[K] & string]: (variant: Variant<T, K, V>) => R },
-): R {
-  const handler = handlers[value[key] as T[K] & string];
-  return handler(value as any);
+): Cases<T, K, T, never> {
+  return new MatchExpr(key as string, value) as any;
 }
 ```
-
-**網羅性保証**: ハンドラオブジェクトのキーは union の全 variant を要求する。キーが欠けるとコンパイルエラー。
 
 ### assertNever — switch 文用の exhaustive guard
 
@@ -94,9 +137,9 @@ function assertNever(value: never, message?: string): never {
 
 | パターン | 用途 | 例 |
 |---------|------|-----|
-| `matchOn` | 値を返す式。短いハンドラ | UI のモード分岐、ラベル取得 |
+| `match(key, value).case().exhaustive()` | 値を返す式。builder チェーン | セッション分岐、イベントハンドリング |
 | `switch` + `assertNever` | 副作用を伴う文。複雑なロジック | event-system の materialize |
-| `satisfies Record<T, V>` | 静的マッピング（関数不要） | ステータスラベル、色マップ |
+| `{ ... } satisfies Record<T, V>` | 静的マッピング（関数不要） | ステータスラベル、色マップ |
 
 ---
 
@@ -170,18 +213,24 @@ type StructuredSession = BaseSession & {
 
 ### 権限応答の解決
 
-terminal モードでも CC は MCP 経由で権限制御できる。`matchOn` で式として分岐:
+terminal モードでも CC は MCP 経由で権限制御できる。`match` builder で式として分岐:
 
 ```typescript
 function handlePermissionResponse(session: AgentSession, requestId: RequestId, decision: PermissionDecision) {
-  matchOn("mode", session, {
-    structured: (s) => s.respondToPermission(requestId, decision),
-    terminal: (s) => permissionHandlers.get(s.provider.id)?.(requestId, decision),
-  });
+  match("mode", session)
+    .case("structured", (s) => s.respondToPermission(requestId, decision))
+    .case("terminal", (s) => permissionHandlers.get(s.provider.id)?.(requestId, decision))
+    .exhaustive();
 }
 ```
 
-**switch 版との比較**: `matchOn` は variant ごとに型が絞られる（`s` は `StructuredSession` / `TerminalSession`）。`break` 忘れもない。新しい mode variant を追加するとハンドラのキー不足でコンパイルエラー。
+**型の動き:**
+1. `match("mode", session)` → `Cases<AgentSession, "mode", AgentSession, never>`
+2. `.case("structured", ...)` → `Cases<..., Exclude<AgentSession, {mode:"structured"}>, R1>` = `Cases<..., TerminalSession, R1>`
+3. `.case("terminal", ...)` → `Cases<..., never, R1 | R2>`
+4. `.exhaustive()` → `[never] extends [never]` = true → 呼べる
+
+`.case("terminal", ...)` を消すと: `Remaining = TerminalSession` → `[TerminalSession] extends [never]` = false → `NonExhaustiveError<TerminalSession>` → `.exhaustive()` がコンパイルエラー。
 
 ---
 
@@ -289,20 +338,20 @@ type ErrorEvent = {
 
 **`Record<string, unknown>` の排除**: PermissionRequestEvent の `args` は以前 `Record<string, unknown>` だったが、ToolUseEvent と同じ index signature パターンに統一。既知のキー（file_path, command）は型で明示し、未知のキーは index signature で許容。
 
-**使用例 — matchOn（値を返す式）:**
+**使用例 — match builder（値を返す式）:**
 
 ```typescript
 // イベントの 1 行サマリを生成
 function summarize(event: AgentEvent): string {
-  return matchOn("type", event, {
-    message:            (e) => `${e.payload.role}: ${e.payload.content.slice(0, 80)}`,
-    tool_use:           (e) => `${e.payload.tool}(${e.payload.args.file_path ?? ""})`,
-    tool_result:        (e) => `${e.payload.tool} → ${e.payload.error ?? "ok"}`,
-    permission_request: (e) => `Permission: ${e.payload.tool}`,
-    cost_update:        (e) => `${e.payload.tokens_in} in / ${e.payload.tokens_out} out`,
-    context_update:     (e) => `ctx ${e.payload.context_percent}%`,
-    error:              (e) => e.payload.message,
-  });
+  return match("type", event)
+    .case("message",            (e) => `${e.payload.role}: ${e.payload.content.slice(0, 80)}`)
+    .case("tool_use",           (e) => `${e.payload.tool}(${e.payload.args.file_path ?? ""})`)
+    .case("tool_result",        (e) => `${e.payload.tool} → ${e.payload.error ?? "ok"}`)
+    .case("permission_request", (e) => `Permission: ${e.payload.tool}`)
+    .case("cost_update",        (e) => `${e.payload.tokens_in} in / ${e.payload.tokens_out} out`)
+    .case("context_update",     (e) => `ctx ${e.payload.context_percent}%`)
+    .case("error",              (e) => e.payload.message)
+    .exhaustive();
 }
 ```
 
@@ -370,11 +419,11 @@ if (provider.resume) {
   showResumeButton();
 }
 
-// mode 分岐 — matchOn で式として
-const view = matchOn("mode", provider, {
-  terminal:   () => <TerminalView />,
-  structured: () => <StructuredView />,
-});
+// mode 分岐 — match builder で式として
+const view = match("mode", provider)
+  .case("terminal",   () => <TerminalView />)
+  .case("structured", () => <StructuredView />)
+  .exhaustive();
 
 // 静的マッピング — satisfies で網羅性チェック
 const MODE_LABEL = {
