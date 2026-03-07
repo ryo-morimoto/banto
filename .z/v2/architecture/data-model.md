@@ -26,6 +26,14 @@ type NotificationPriority = "critical" | "high" | "normal";
 // EventSource, Confidence は agent-provider-interface.md で定義済み
 ```
 
+**SessionEventType と AgentEvent の関係:**
+- `AgentEvent["type"]` (7 variant) = エージェントが emit するイベント。`agent-provider-interface.md` で定義
+- `SessionEventType` (9 variant) = `AgentEvent["type"]` + `"status_changed"` + `"permission_response"`
+- 追加 2 variant は SessionRunner が内部生成する:
+  - `status_changed`: AgentSession の `emit("status")` を変換。sessions テーブルの status を更新
+  - `permission_response`: auto_approve またはユーザー手動応答。sessions テーブルの status を running に戻す
+- 型としては `SessionEvent = AgentEvent | StatusChangedEvent | PermissionResponseEvent`（`event-system.md` で定義）
+
 ---
 
 ## スキーマ
@@ -62,6 +70,14 @@ CREATE TABLE tasks (
 
 CREATE INDEX idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX idx_tasks_status ON tasks(status);
+
+-- Auto-update updated_at on every UPDATE to ensure S1 sort order correctness.
+CREATE TRIGGER trg_tasks_updated_at
+  AFTER UPDATE ON tasks
+  FOR EACH ROW
+BEGIN
+  UPDATE tasks SET updated_at = datetime('now') WHERE id = NEW.id;
+END;
 ```
 
 **status 遷移（アプリケーション層で強制）:**
@@ -89,7 +105,7 @@ CREATE TABLE sessions (
 
   -- Context & Summary（product/information-architecture.md で追加）
   context_percent INTEGER CHECK (context_percent BETWEEN 0 AND 100),
-  agent_summary TEXT,
+  agent_summary TEXT,  -- Generated from agent's last assistant message on session completion. Nullable.
   diff_summary TEXT,  -- JSON: DiffSummary
 
   -- Timestamps
@@ -219,6 +235,13 @@ CREATE TABLE server_state (
 | key | 値 | 用途 |
 |-----|-----|------|
 | instance_id | UUID | クラッシュ復旧時の孤立セッション検出 |
+
+---
+
+## Conventions
+
+- **Datetime**: All `TEXT` datetime columns store ISO 8601 UTC (`datetime('now')` returns UTC). Client converts to local time for display.
+- **ID format**: ULID (time-sortable + random). TypeScript side uses branded types (`SessionId`, `TaskId`, etc.).
 
 ---
 

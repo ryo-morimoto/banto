@@ -12,7 +12,7 @@ AgentProvider / AgentSession の型定義、メソッド契約、イベント分
 1. **Discriminated union**: 消費者は自分に関係ない capability を知る必要がない
 2. **Branded types**: `string` はドメインの意図を喪失する。ID は branded type で取り違えをコンパイル時に検出
 3. **`type` デフォルト**: `interface` は declaration merging で外部から拡張される。sealed な型は `type` で定義。`interface` は意図的拡張点（EventEmitter 等の外部契約）のみ
-4. **Exhaustive match**: discriminated union の分岐は `matchOn` ヘルパー（式）または `switch` + `assertNever`（文）で網羅性を保証。ts-pattern 等の外部依存は不要
+4. **Exhaustive match**: discriminated union の分岐は `match` builder で網羅性を保証。ts-pattern のアーキテクチャを参考に 25 行で再現。外部依存は不要
 
 ---
 
@@ -124,22 +124,15 @@ function match<T extends Record<K, string>, K extends keyof T>(
 }
 ```
 
-### assertNever — switch 文用の exhaustive guard
-
-```typescript
-// shared/assert.ts
-function assertNever(value: never, message?: string): never {
-  throw new Error(message ?? `Unexpected value: ${JSON.stringify(value)}`);
-}
-```
-
 ### 使い分け
 
 | パターン | 用途 | 例 |
 |---------|------|-----|
-| `match(key, value).case().exhaustive()` | 値を返す式。builder チェーン | セッション分岐、イベントハンドリング |
-| `switch` + `assertNever` | 副作用を伴う文。複雑なロジック | event-system の materialize |
+| `match(key, value).case().exhaustive()` | discriminated union の分岐（式・副作用問わず） | セッション分岐、materialize、通知生成 |
 | `{ ... } satisfies Record<T, V>` | 静的マッピング（関数不要） | ステータスラベル、色マップ |
+| `if (provider.resume)` | boolean discriminant | resume 判定 |
+
+**`match` は副作用にも使える**: handler 内で DB 更新や通知生成を行い、戻り値は無視してよい。`switch` + `assertNever` は不要。
 
 ---
 
@@ -355,22 +348,20 @@ function summarize(event: AgentEvent): string {
 }
 ```
 
-**使用例 — switch + assertNever（副作用を伴う文）:**
+**使用例 — 副作用を伴う分岐（match builder）:**
 
 ```typescript
-// materialize のような複雑な分岐は switch が読みやすい
+// match は副作用にも使える。戻り値を無視するだけ
 function handleEvent(event: AgentEvent) {
-  switch (event.type) {
-    case "message":
-      console.log(`${event.payload.role}: ${event.payload.content}`);
-      break;
-    case "permission_request":
-      showPermissionUI(event.payload.requestId, event.payload.tool);
-      break;
-    // ... 全 case を列挙
-    default:
-      assertNever(event);  // 新 variant 追加時にコンパイルエラー
-  }
+  match("type", event)
+    .case("message",            (e) => console.log(`${e.payload.role}: ${e.payload.content}`))
+    .case("permission_request", (e) => showPermissionUI(e.payload.requestId, e.payload.tool))
+    .case("tool_use",           (e) => logToolUse(e.payload.tool, e.payload.args))
+    .case("tool_result",        () => {})
+    .case("cost_update",        () => {})
+    .case("context_update",     () => {})
+    .case("error",              (e) => showError(e.payload.message))
+    .exhaustive();
 }
 ```
 
@@ -555,10 +546,10 @@ AgentSession          SessionRunner              DB / WebSocket
   |                      |                         |
   | emit("event")        |                         |
   +--------------------->|                         |
-  |                      | switch (event.type) {   |
-  |                      |   case "permission_request": ... |
-  |                      |   case "cost_update": ...       |
-  |                      | }                       |
+  |                      | match("type", event)    |
+  |                      |   .case("perm_req", ...) |
+  |                      |   .case("cost", ...)     |
+  |                      |   .exhaustive()          |
   |                      | session_events INSERT   |
   |                      +------------------------>|
   |                      | WS push: session_event  |

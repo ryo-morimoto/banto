@@ -134,18 +134,22 @@ class JsonRpcClient extends EventEmitter {
 | UsageUpdate | cost_update | `{ tokens_in, tokens_out, cost_usd }` |
 
 ```typescript
+// Codex RPC メソッド名の discriminated union
+type CodexRpcMethod = "Message" | "ApprovalRequired" | "AgentStatus" | "UsageUpdate"
+  | "ExecCommand" | "ExecCommandResult" | "FileEdit" | "FileRead" | "TurnStarted" | "TurnComplete";
+
 private handleRpcEvent(msg: { method: string; params: unknown }) {
-  switch (msg.method) {
-    case "Message":
+  const handlers = {
+    Message: () => {
       this.emit("event", {
         type: "message",
         source: "protocol",
         confidence: "high",
         payload: { role: "assistant", content: msg.params.content },
       } satisfies MessageEvent);
-      break;
+    },
 
-    case "ApprovalRequired":
+    ApprovalRequired: () => {
       this.emit("event", {
         type: "permission_request",
         source: "protocol",
@@ -158,16 +162,16 @@ private handleRpcEvent(msg: { method: string; params: unknown }) {
         },
       } satisfies PermissionRequestEvent);
       this.emit("status", { status: "waiting_permission", confidence: "high" });
-      break;
+    },
 
-    case "AgentStatus":
+    AgentStatus: () => {
       if (msg.params.status === "Completed") {
         // プロセス終了はしない（app-server は生き続ける）
         // banto 側で "done" を設定
       }
-      break;
+    },
 
-    case "UsageUpdate":
+    UsageUpdate: () => {
       this.emit("event", {
         type: "cost_update",
         source: "protocol",
@@ -178,10 +182,12 @@ private handleRpcEvent(msg: { method: string; params: unknown }) {
           cost_usd: msg.params.cost,
         },
       } satisfies CostUpdateEvent);
-      break;
+    },
 
     // ... other events
-  }
+  } satisfies Partial<Record<CodexRpcMethod, () => void>>;
+
+  handlers[msg.method as keyof typeof handlers]?.();
 }
 ```
 

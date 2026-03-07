@@ -56,7 +56,7 @@ ctx % の色:
 type TimelineEntry = {
   seq: number;
   time: string;                 // HH:MM
-  type: AgentEvent["type"];     // discriminated union の type フィールド
+  type: SessionEvent["type"];   // AgentEvent + status_changed + permission_response
   summary: string;              // 1 行要約
   detail?: unknown;             // 展開時の詳細
 };

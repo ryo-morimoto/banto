@@ -7,27 +7,66 @@
 
 ---
 
+## SessionEvent（レジャーの単位型）
+
+`AgentEvent`（エージェントが emit するもの）に、SessionRunner が生成する内部イベントを加えた superset。
+`session_events` テーブルに保存されるすべてのイベントの型。
+
+```typescript
+// AgentEvent (7 variants) — agent-provider-interface.md で定義。変更なし。
+// SessionEvent (9 variants) — AgentEvent + SessionRunner 内部イベント。
+
+type StatusChangedEvent = {
+  type: "status_changed";
+  source: EventSource;
+  confidence: Confidence;
+  payload: {
+    status: SessionStatus;
+    previous?: SessionStatus;
+  };
+};
+
+type PermissionResponseEvent = {
+  type: "permission_response";
+  source: "user" | "auto";
+  confidence: "high";
+  payload: {
+    requestId: RequestId;
+    approved: boolean;
+  };
+};
+
+type SessionEvent = AgentEvent | StatusChangedEvent | PermissionResponseEvent;
+```
+
+**関係:**
+- `AgentEvent` = エージェントプロセスが emit する 7 variant。agent-provider-interface.md が定義
+- `SessionEvent` = session_events に保存する 9 variant。AgentEvent は SessionEvent の部分集合
+- `SessionEventType = SessionEvent["type"]` = data-model.md の CHECK 制約と 1:1 対応
+
+---
+
 ## 全体フロー
 
 ```
 AgentSession              SessionRunner             DB                WebSocket
   |                          |                      |                    |
   | emit("event", e)         |                      |                    |
-  +------------------------->|                      |                    |
-  |                          | seq = nextSeq()      |                    |
-  |                          | session_events INSERT |                    |
-  |                          +--------------------->|                    |
+  +------------------------->| record(e)            |                    |
+  |                          |   seq = nextSeq()    |                    |
+  |                          |   session_events INSERT                   |
+  |                          |   +----------------->|                    |
+  |                          |   materialize(e)     |                    |
+  |                          |   +----------------->|                    |
+  |                          |   maybeNotify(e)     |                    |
+  |                          |   +----------------->|                    |
+  |                          |   WS broadcast(e)    |                    |
+  |                          |   +------------------------------------->|
   |                          |                      |                    |
-  |                          | materialize(e)       |                    |
-  |                          | (sessions UPDATE)    |                    |
-  |                          +--------------------->|                    |
-  |                          |                      |                    |
-  |                          | notify?(e)           |                    |
-  |                          | (notifications INSERT)|                   |
-  |                          +--------------------->|                    |
-  |                          |                      |                    |
-  |                          | WS broadcast(e)      |                    |
-  |                          +--------------------------------------------->|
+  | emit("status", s)        |                      |                    |
+  +------------------------->| → StatusChangedEvent |                    |
+  |                          | record(e)            |                    |
+  |                          |   (same pipeline)    |                    |
   |                          |                      |                    |
 ```
 
@@ -37,13 +76,36 @@ AgentSession              SessionRunner             DB                WebSocket
 
 ### 追記フロー
 
-SessionRunner がイベントを受け取ったとき:
+SessionRunner が AgentSession の 2 つのチャネルを listen し、統一パイプライン `record()` に流す:
 
 ```typescript
 class SessionRunner {
   private seqCounters = new Map<SessionId, number>();
 
-  private handleEvent(sessionId: SessionId, event: AgentEvent) {
+  /** AgentSession のリスナー登録 */
+  private attachListeners(sessionId: SessionId, session: AgentSession) {
+    // emit("event") — AgentEvent はそのまま SessionEvent として record
+    session.on("event", (event: AgentEvent) => {
+      this.record(sessionId, event, session);
+    });
+
+    // emit("status") — AgentStatus → StatusChangedEvent に変換して record
+    session.on("status", (status: AgentStatus) => {
+      const event: StatusChangedEvent = {
+        type: "status_changed",
+        source: status.confidence === "high" ? "protocol" : "heuristic",
+        confidence: status.confidence,
+        payload: { status: status.status },
+      };
+      this.record(sessionId, event, session);
+    });
+  }
+
+  /**
+   * 統一パイプライン。全 SessionEvent がここを通る。
+   * 1. Ledger append → 2. Auto-approve check → 3. Materialize → 4. Notify → 5. WS broadcast
+   */
+  private record(sessionId: SessionId, event: SessionEvent, session: AgentSession) {
     const seq = this.nextSeq(sessionId);
 
     // 1. Append to ledger
@@ -56,13 +118,24 @@ class SessionRunner {
       payload: JSON.stringify(event.payload),
     });
 
-    // 2. Materialize (update sessions table)
+    // 2. Auto-approve check (permission_request only)
+    if (event.type === "permission_request" && this.autoApproveRules.matches(sessionId, event)) {
+      const response: PermissionResponseEvent = {
+        type: "permission_response",
+        source: "auto",
+        confidence: "high",
+        payload: { requestId: event.payload.requestId, approved: true },
+      };
+      this.record(sessionId, response, session);  // 再帰: response も同じパイプラインで記録
+      if (session.mode === "structured") {
+        session.respondToPermission(event.payload.requestId, { requestId: event.payload.requestId, approved: true });
+      }
+      return;  // materialize / notify をスキップ（auto-approve が代わりに処理）
+    }
+
+    // 3. Materialize + Notify + Broadcast
     this.materialize(sessionId, event);
-
-    // 3. Generate notifications if needed
     this.maybeNotify(sessionId, event);
-
-    // 4. Push to connected clients
     this.wsBroadcast(sessionId, { seq, ...event });
   }
 
@@ -104,49 +177,51 @@ GROUP BY session_id;
 | error | error（最新エラーを上書き） |
 
 ```typescript
-// 副作用ベースの複雑な分岐 → switch + assertNever が適切。
-// matchOn は値を返す式向き。materialize は各 case で DB 更新するため switch。
-private materialize(sessionId: SessionId, event: AgentEvent) {
-  switch (event.type) {
-    case "permission_request":
-      // event.payload.requestId: RequestId, .tool, .args が確定
+private materialize(sessionId: SessionId, event: SessionEvent) {
+  match("type", event)
+    .case("status_changed", (e) => {
+      this.sessionRepo.update(sessionId, {
+        status: e.payload.status,
+        status_confidence: e.confidence,
+      });
+    })
+    .case("permission_request", (e) => {
       this.sessionRepo.update(sessionId, {
         status: "waiting_permission",
-        status_confidence: event.confidence,
+        status_confidence: e.confidence,
       });
-      break;
-
-    case "cost_update":
-      // event.payload.tokens_in, .tokens_out, .cost_usd が確定
+    })
+    .case("permission_response", (e) => {
+      if (e.payload.approved) {
+        this.sessionRepo.update(sessionId, {
+          status: "running",
+          status_confidence: "high",
+        });
+      }
+    })
+    .case("cost_update", (e) => {
       this.sessionRepo.update(sessionId, {
-        tokens_in: event.payload.tokens_in,
-        tokens_out: event.payload.tokens_out,
-        cost_usd: event.payload.cost_usd ?? 0,
+        tokens_in: e.payload.tokens_in,
+        tokens_out: e.payload.tokens_out,
+        cost_usd: e.payload.cost_usd ?? 0,
       });
-      break;
-
-    case "context_update":
-      // event.payload.context_percent が確定
+    })
+    .case("context_update", (e) => {
       this.sessionRepo.update(sessionId, {
-        context_percent: event.payload.context_percent,
+        context_percent: e.payload.context_percent,
       });
-      break;
-
-    case "error":
-      // event.payload.message が確定
-      this.sessionRepo.update(sessionId, { error: event.payload.message });
-      break;
-
-    case "message":
-    case "tool_use":
-    case "tool_result":
-      // レジャーに追記するだけ。sessions テーブルは更新しない
-      break;
-  }
+    })
+    .case("error", (e) => {
+      this.sessionRepo.update(sessionId, { error: e.payload.message });
+    })
+    .case("message",     () => {})  // レジャーに追記するだけ
+    .case("tool_use",    () => {})
+    .case("tool_result", () => {})
+    .exhaustive();
 }
 ```
 
-**注意**: message, tool_use, tool_result はレジャーに追記するだけで sessions テーブルは更新しない。
+**注意**: message, tool_use, tool_result はレジャーに追記するだけで sessions テーブルは更新しない。handler を `() => {}` にすることで明示。新しい SessionEvent variant を追加すると `.exhaustive()` がコンパイルエラーになる。
 
 ---
 
@@ -155,25 +230,22 @@ private materialize(sessionId: SessionId, event: AgentEvent) {
 イベントに基づいて notifications テーブルに INSERT + Push 通知を送信する。
 
 ```typescript
-private maybeNotify(sessionId: SessionId, event: AgentEvent) {
+private maybeNotify(sessionId: SessionId, event: SessionEvent) {
   const session = this.sessionRepo.get(sessionId);
   const task = this.taskRepo.get(session.task_id);
 
-  switch (event.type) {
-    case "permission_request":
-      // event.payload.tool, .args が型で確定
+  match("type", event)
+    .case("permission_request", (e) => {
       this.notificationService.create({
         session_id: sessionId,
         type: "permission_required",
         priority: "critical",
         title: task.title,
-        body: `${event.payload.tool}(${event.payload.args.file_path ?? ""})`,
+        body: `${e.payload.tool}(${e.payload.args.file_path ?? ""})`,
       });
-      break;
-
-    case "context_update":
-      // event.payload.context_percent が型で確定
-      if (event.payload.context_percent >= 90) {
+    })
+    .case("context_update", (e) => {
+      if (e.payload.context_percent >= 90) {
         const existing = this.notificationRepo.findBySessionAndType(
           sessionId, "context_warning"
         );
@@ -183,12 +255,19 @@ private maybeNotify(sessionId: SessionId, event: AgentEvent) {
             type: "context_warning",
             priority: "high",
             title: task.title,
-            body: `Context usage: ${event.payload.context_percent}%`,
+            body: `Context usage: ${e.payload.context_percent}%`,
           });
         }
       }
-      break;
-  }
+    })
+    .case("status_changed",      () => {})
+    .case("permission_response", () => {})
+    .case("message",             () => {})
+    .case("tool_use",            () => {})
+    .case("tool_result",         () => {})
+    .case("cost_update",         () => {})
+    .case("error",               () => {})
+    .exhaustive();
 }
 ```
 
@@ -198,6 +277,14 @@ private maybeNotify(sessionId: SessionId, event: AgentEvent) {
 private onExit(sessionId: SessionId, info: ExitInfo) {
   const session = this.sessionRepo.get(sessionId);
   const task = this.taskRepo.get(session.task_id);
+
+  // Extracts agent's last assistant message as summary.
+  // Nullable — not all agents produce a final summary message.
+  const lastMessage = this.eventRepo.findLastByType(sessionId, "message");
+  const agentSummary = (lastMessage?.payload.role === "assistant")
+    ? lastMessage.payload.content.slice(0, 200)
+    : null;
+  this.sessionRepo.update(sessionId, { agent_summary: agentSummary });
 
   if (info.code === 0) {
     this.notificationService.create({
@@ -243,10 +330,10 @@ type WsMessage =
 
 type SessionEventPayload = {
   seq: number;
-  type: AgentEvent["type"];
+  type: SessionEvent["type"];
   source: EventSource;
   confidence: Confidence;
-  payload: AgentEvent["payload"];
+  payload: SessionEvent["payload"];
   occurredAt: string;  // ISO 8601
 };
 
@@ -316,7 +403,7 @@ class AutoApproveRules {
     this.rules.set(sessionId, existing);
   }
 
-  matches(sessionId: SessionId, event: AgentEvent): boolean {
+  matches(sessionId: SessionId, event: SessionEvent): boolean {
     if (event.type !== "permission_request") return false;
     const rules = this.rules.get(sessionId);
     if (!rules) return false;
@@ -344,28 +431,7 @@ type ApproveRule = {
 };
 ```
 
-**統合ポイント**: SessionRunner の handleEvent() 内で permission_request 時に照合。
-
-```typescript
-case "permission_request":
-  if (this.autoApproveRules.matches(sessionId, event)) {
-    // 自動承認 — event.payload.requestId は RequestId 型
-    this.eventRepo.insert({
-      session_id: sessionId,
-      seq: this.nextSeq(sessionId),
-      type: "permission_response",
-      source: "auto",
-      confidence: "high",
-      payload: JSON.stringify({ requestId: event.payload.requestId, approved: true }),
-    });
-    await agentSession.respondToPermission(event.payload.requestId, { approved: true });
-    this.materialize(sessionId, { type: "permission_response", ... });
-    this.wsBroadcast(sessionId, { type: "permission_response", ... });
-    return;  // 通知は生成しない
-  }
-  // 自動承認に一致しない → 通常フロー（通知生成 + waiting_permission）
-  break;
-```
+**統合ポイント**: `record()` パイプライン内で permission_request 時に照合。auto_approve が一致した場合、`PermissionResponseEvent` を再帰的に `record()` に流す。詳細はイベントレジャーの `record()` を参照。
 
 ---
 

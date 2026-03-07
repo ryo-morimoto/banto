@@ -110,22 +110,25 @@ app.post("/api/hooks/claude-code", async ({ query, body }) => {
   const sessionId = SessionId(query.session);
   const eventType = query.event;
 
-  switch (eventType) {
-    case "notification":
+  const handlers = {
+    notification: () => {
       this.emitEvent(sessionId, convertNotification(body));
       return { status: "ok" };
-
-    case "pre_tool_use":
+    },
+    pre_tool_use: () => {
       // banto の権限制御は MCP permission-prompt-tool で行う
       return { decision: "approve" };
-
-    case "post_tool_use":
+    },
+    post_tool_use: () => {
       this.emitEvent(sessionId, convertPostToolUse(body));
       return { status: "ok" };
-
-    case "stop":
+    },
+    stop: () => {
       return { status: "ok" };
-  }
+    },
+  } satisfies Record<string, () => unknown>;
+
+  return handlers[eventType]?.() ?? { status: "ok" };
 });
 ```
 
