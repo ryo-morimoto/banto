@@ -37,6 +37,7 @@ CC . feat/auth . 12m . 14k/9k tokens . ~$0.12 . ctx 78%
 | フィールド | データソース | 更新トリガー |
 |-----------|------------|-------------|
 | エージェント名 | session.agent_provider → provider.name | 固定 |
+| モード (Build/Plan) | session.agent_mode | WS: mode_switched。クリックで切替（modeSwitching 対応時のみ） |
 | ブランチ | session.branch | 固定 |
 | 経過時間 | now() - session.started_at | 1 秒ごと（クライアント計算） |
 | トークン | session.tokens_in / tokens_out | WS: cost_update |
@@ -69,6 +70,8 @@ type TimelineEntry = {
 | tool_use (Bash) | > | bash: bun test |
 | permission_request | !! | Permission: Write(package.json) [Approve] |
 | permission_response | v / x | Approved / Denied / Auto-approved |
+| compact | ~ | Context compaction started (auto) |
+| mode_switched | * | Switched to Plan mode |
 | status_changed | * | running / done (exit 0) |
 | error | x | Process exited with code 1 |
 | cost_update | $ | 14k in / 9k out |
@@ -158,6 +161,7 @@ function renderEvent(event: AgentEvent): ReactNode {
     .case("tool_result",        (e) => <ToolResultBlock tool={e.payload.tool} result={e.payload.result} error={e.payload.error} />)
     .case("permission_request", (e) => <PermissionCard requestId={e.payload.requestId} tool={e.payload.tool} args={e.payload.args} />)
     .case("error",              (e) => <ErrorBlock message={e.payload.message} />)
+    .case("compact",            (e) => <CompactWarning reason={e.payload.reason} />)
     .case("cost_update",        () => null)
     .case("context_update",     () => null)
     .exhaustive();
@@ -210,6 +214,71 @@ function MessageInput({ sessionId }: { sessionId: SessionId }) {
 |-------------|---------------|-----------------|
 | 権限応答 | Timeline の [Approve] or S7 モーダル | ConversationPanel の PermissionCard or S7 モーダル |
 | Mid-session steering | キーボード入力 → PTY write | MessageInput → sendMessage() |
+| Mode switching | StatusBar の [Build\|Plan] トグル | 同左 |
 | Stop | StatusBar の [Stop] ボタン | 同左 |
 | View Full Diff | Summary セクションのリンク | 同左 |
 | タイムライン展開/折りたたみ | クリック | 同左 |
+
+---
+
+## Agent Mode Switching (Build/Plan)
+
+OpenCode で最も称賛された UX パターン。エージェントのアクセスレベルを mid-session で切替。
+
+### モード定義
+
+| Mode | アクセスレベル | ユースケース |
+|------|------------|------------|
+| Build | フルアクセス（Read, Edit, Write, Bash） | 通常の開発 |
+| Plan | 読み取り専用（Read, Glob, Grep のみ） | 探索、分析、計画。TH5 (scout) に該当 |
+
+### UI
+
+StatusBar にトグルとして表示。`provider.modeSwitching` が true の場合のみクリック可能。
+
+```
+CC . [Build|Plan] . feat/auth . 12m . 14k/9k . ~$0.12 . ctx 78%
+       ^^^^^^^^^
+       clickable toggle (modeSwitching 対応時のみ)
+```
+
+### プロバイダー別の実装
+
+```typescript
+// mode switching の実装は provider ごとに異なる
+function switchMode(session: AgentSession, mode: AgentMode) {
+  match("mode", session)
+    .case("terminal", (s) => {
+      // CC: slash command を PTY に書き込む
+      const command = mode === "plan" ? "/plan\n" : "/build\n";
+      s.writeTerminal(new TextEncoder().encode(command));
+    })
+    .case("structured", (s) => {
+      // ACP: session/set_mode RPC call (capability dependent)
+      s.switchMode?.(mode);
+    })
+    .exhaustive();
+}
+```
+
+### データフロー
+
+```
+ユーザー                      banto                         エージェント
+  |                            |                              |
+  | [Plan] トグルクリック       |                              |
+  +-------------------------->|                              |
+  |                            | switchMode("plan")           |
+  |                            +----------------------------->|
+  |                            |                              | モード切替
+  |                            |<-----------------------------+
+  |                            | emit("modeSwitched", "plan") |
+  |                            | session_events INSERT        |
+  |                            |  (mode_switched)             |
+  |                            | sessions UPDATE              |
+  |                            |  (agent_mode = "plan")       |
+  |                            | WS push: mode_switched       |
+  |                            +----------------------------->|
+  |                            |                              | StatusBar 更新
+  |                            |                              | Timeline: * Switched to Plan
+```

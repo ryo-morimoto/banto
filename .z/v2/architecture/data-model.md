@@ -17,7 +17,9 @@ type SessionStatus = "pending" | "running" | "waiting_permission" | "done" | "fa
 type SessionEventType =
   | "status_changed" | "message" | "tool_use" | "tool_result"
   | "permission_request" | "permission_response"
-  | "error" | "cost_update" | "context_update";
+  | "error" | "cost_update" | "context_update"
+  | "compact" | "mode_switched";
+type AgentMode = "build" | "plan";
 type NotificationType =
   | "permission_required" | "session_done" | "session_failed"
   | "context_warning" | "session_recovered" | "session_orphaned";
@@ -103,6 +105,10 @@ CREATE TABLE sessions (
   status_confidence TEXT NOT NULL DEFAULT 'high'
     CHECK (status_confidence IN ('high', 'medium', 'low')),
 
+  -- Session metadata
+  title TEXT,  -- Auto-generated from session content on completion. Nullable.
+  agent_mode TEXT CHECK (agent_mode IN ('build', 'plan')),  -- Current agent mode. NULL if not supported.
+
   -- Context & Summary（product/information-architecture.md で追加）
   context_percent INTEGER CHECK (context_percent BETWEEN 0 AND 100),
   agent_summary TEXT,  -- Generated from agent's last assistant message on session completion. Nullable.
@@ -147,7 +153,7 @@ running -> failed        (exit code != 0 or エラー)
 pending -> failed        (spawn 失敗)
 ```
 
-- TypeScript 側: `id` → `SessionId`, `task_id` → `TaskId`, `agent_provider` → `ProviderId`, `status` → `SessionStatus`, `status_confidence` → `Confidence`
+- TypeScript 側: `id` → `SessionId`, `task_id` → `TaskId`, `agent_provider` → `ProviderId`, `status` → `SessionStatus`, `status_confidence` → `Confidence`, `agent_mode` → `AgentMode | null`
 
 **同時実行制約:**
 1 タスクにつきアクティブセッション（status IN ('pending', 'running', 'waiting_permission')）は最大 1。
@@ -174,7 +180,8 @@ CREATE TABLE session_events (
     CHECK (type IN (
       'status_changed', 'message', 'tool_use', 'tool_result',
       'permission_request', 'permission_response',
-      'error', 'cost_update', 'context_update'
+      'error', 'cost_update', 'context_update',
+      'compact', 'mode_switched'
     )),
   source TEXT NOT NULL
     CHECK (source IN ('hook', 'protocol', 'mcp', 'process', 'heuristic', 'user', 'auto')),
@@ -334,7 +341,8 @@ ORDER BY
 
 ```sql
 SELECT
-  s.id, s.status, s.agent_provider, s.started_at, s.finished_at,
+  s.id, s.title, s.status, s.agent_provider, s.agent_mode,
+  s.started_at, s.finished_at,
   s.exit_code, s.branch, s.tokens_in, s.tokens_out, s.cost_usd,
   s.diff_summary, s.agent_summary, s.error
 FROM sessions s

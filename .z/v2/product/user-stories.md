@@ -82,6 +82,7 @@
 | IN3 | 実行を停止したい | 明らかに間違った方向に進んでいるとき、即座に止めたい | WHEN 「Stop」を押す THEN プロセスが停止し、ステータスが更新される | P0 | - (table stakes) |
 | IN4 | 「このタスク内は同種の権限を自動承認」したい | 同じツールの同じファイルへのアクセスを毎回承認するのは面倒 | WHEN 承認時に「Remember」をチェック THEN 現在の実行内の同種リクエストが自動承認される | P2 | architecture-decision (D5), learnings-cross-cutting |
 | IN5 | エージェントが設計意図から逸れているのを早めに気づきたい | 長時間の実行でエージェントが「自分のやり方」に引き戻される。イベントログの変化パターンで察知したい | WHEN エージェントが spec と乖離した操作をしている THEN タイムラインのツール使用パターンから人間が判断できる | P2 | user-workflows-multi-agent ("agent drift / design intent erosion", daxfohl HN) |
+| IN6 | 実行中にエージェントの行動モード（探索/開発）を切り替えたい | 探索フェーズが終わったら開発モードに切り替えたい。停止→再開は面倒 | WHEN S3 ステータスバーの Build/Plan トグルをクリック THEN エージェントのモードが即座に切り替わり、タイムラインに記録される | P1 | opencode ("Tab to switch agents is brilliant UX") |
 
 ---
 
@@ -114,6 +115,7 @@
 | RC1 | サーバー再起動後に中断されたタスクが検知・通知されてほしい | 夜中にサーバーが再起動しても、朝開いたときに何が起きたか分かってほしい | WHEN サーバー再起動 THEN 中断されたタスクが検知され、ダッシュボードに通知が表示される | P0 | architecture-decision (D8), gob (daemon instance_id) |
 | RC2 | resume 可能なエージェントは自動再開してほしい | CC の --resume、Codex の thread resume が使えるなら、手動で再開させたくない | WHEN resume 対応エージェントの中断タスクがある THEN 自動再開が試みられ、結果が通知される | P1 | architecture-decision (D8) |
 | RC3 | ターミナルスクロールバックが crash しても残っていてほしい | ブラウザを閉じて開き直したとき、直前のターミナル出力が見えないと何が起きたか分からない | WHEN ブラウザ再接続 or セッション完了後 THEN スクロールバックが ring buffer / ディスクから復元される | P2 | architecture-decision (D4, D6), superset (scrollback persistence) |
+| RC4 | コンテキスト圧縮が始まる前に知りたい | 圧縮で重要なコンテキストが失われるリスクがある。事前に知って Stop するか判断したい | WHEN エージェントがコンテキスト圧縮を開始 THEN 通知 + タイムラインに表示される | P1 | "Claude Code compaction silently destroyed 4 hours of my work" (DEV Community), CC PreCompact hook |
 
 ---
 
@@ -145,7 +147,7 @@
 | 優先度 | 意味 | ストーリー数 |
 |--------|------|------------|
 | P0 | コアループに必須。これがないと banto の存在意義がない | 14 |
-| P1 | 実用上ほぼ必須。なくても動くが、ないと日常利用に支障がある | 16 |
+| P1 | 実用上ほぼ必須。なくても動くが、ないと日常利用に支障がある | 18 |
 | P2 | あると嬉しい。初期リリース後に追加可能 | 7 |
 
 ### P0 一覧（コアループ）

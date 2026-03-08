@@ -54,6 +54,7 @@ type TaskWithSession = {
     id: SessionId;
     status: SessionStatus;
     agentProvider: ProviderId;
+    agentMode: AgentMode | null;
     startedAt: string | null;
     finishedAt: string | null;
     branch: string | null;
@@ -84,8 +85,10 @@ type TaskDetail = {
 
 type SessionSummary = {
   id: SessionId;
+  title: string | null;
   status: SessionStatus;
   agentProvider: ProviderId;
+  agentMode: AgentMode | null;
   startedAt: string | null;
   finishedAt: string | null;
   exitCode: number | null;
@@ -104,9 +107,10 @@ type SessionSummary = {
 
 | メソッド | パス | 説明 | リクエスト | レスポンス |
 |---------|------|------|-----------|----------|
-| POST | `/api/tasks/:taskId/sessions` | 実行開始 | `{ agentProvider }` | `Session` |
+| POST | `/api/tasks/:taskId/sessions` | 実行開始 | `{ agentProvider, initialMode? }` | `Session` |
 | POST | `/api/sessions/:id/stop` | 実行停止 | - | `204` |
 | POST | `/api/sessions/:id/resume` | Resume | - | `Session` |
+| POST | `/api/sessions/:id/mode` | モード切替 | `{ mode: "build" \| "plan" }` | `204` |
 | GET | `/api/sessions/:id` | 詳細 | - | `SessionDetail` |
 | GET | `/api/sessions/:id/events` | イベント一覧 | `?since=seq` | `SessionEvent[]` |
 | GET | `/api/sessions/:id/diff` | フル diff | - | `string` (unified diff) |
@@ -120,6 +124,11 @@ type SessionSummary = {
 **POST /api/sessions/:id/resume:**
 - provider.resume = true でなければ 400 Bad Request
 - status が failed でなければ 409 Conflict
+
+**POST /api/sessions/:id/mode:**
+- provider.modeSwitching = false なら 400 Bad Request (`MODE_SWITCH_NOT_SUPPORTED`)
+- status が running でなければ 409 Conflict
+- session.switchMode(mode) を呼び出し、modeSwitched イベントを待つ
 
 **GET /api/sessions/:id/events?since=seq:**
 - `since` パラメータで差分取得。WebSocket 切断時のキャッチアップ用。
@@ -199,6 +208,7 @@ type ErrorResponse = {
 |------|-------|------|
 | 400 | `VALIDATION_ERROR` | バリデーション失敗 |
 | 400 | `RESUME_NOT_SUPPORTED` | resume 非対応エージェント |
+| 400 | `MODE_SWITCH_NOT_SUPPORTED` | modeSwitching 非対応エージェント |
 | 404 | `NOT_FOUND` | リソースが存在しない |
 | 409 | `ACTIVE_SESSION_EXISTS` | タスクに既にアクティブな実行がある |
 | 409 | `INVALID_STATUS` | 現在のステータスでは実行できない操作 |

@@ -36,6 +36,8 @@
 | [TODO.md](./TODO.md) | 競合 12 ツール/サービスのディープリサーチ TODO | 2026-03-07 |
 | [user-workflows-multi-agent.md](./user-workflows-multi-agent.md) | Real-world multi-agent coding workflows ethnographic research. Pain points, organic behaviors, surprises from HN/blogs/data. 25+ sources, 10 pain point themes, direct quotes | 2026-03-07 |
 | [ui-ux-design-patterns.md](./ui-ux-design-patterns.md) | 12 AI coding agent dashboards UI/UX comparative analysis. Layout archetypes, information hierarchy, one-glance patterns, mobile support, user feedback, ASCII wireframes | 2026-03-07 |
+| [ts-pattern-internals.md](./ts-pattern-internals.md) | ts-pattern source code deep dive. Runtime vs type-level architecture, `as any` usage, exhaustiveness via DeepExclude, minimal discriminated union implementation | 2026-03-08 |
+| [opencode.md](./opencode.md) | anomalyco/opencode deep research. 118k-star provider-agnostic coding agent. Client/server architecture, OpenTUI (Zig), ACP/MCP/LSP support, Zen monetization, Anthropic OAuth controversy, permission system, learnings for banto | 2026-03-08 |
 | [TEMPLATE.md](./TEMPLATE.md) | Canonical structure template for competitor deep-research files | 2026-03-07 |
 
 ## Decisions

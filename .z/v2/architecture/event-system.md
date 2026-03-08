@@ -36,7 +36,17 @@ type PermissionResponseEvent = {
   };
 };
 
-type SessionEvent = AgentEvent | StatusChangedEvent | PermissionResponseEvent;
+type ModeSwitchedEvent = {
+  type: "mode_switched";
+  source: "protocol" | "user";
+  confidence: "high";
+  payload: {
+    mode: AgentMode;
+    previous?: AgentMode;
+  };
+};
+
+type SessionEvent = AgentEvent | StatusChangedEvent | PermissionResponseEvent | ModeSwitchedEvent;
 ```
 
 **関係:**
@@ -96,6 +106,17 @@ class SessionRunner {
         source: status.confidence === "high" ? "protocol" : "heuristic",
         confidence: status.confidence,
         payload: { status: status.status },
+      };
+      this.record(sessionId, event, session);
+    });
+
+    // emit("modeSwitched") — AgentMode → ModeSwitchedEvent に変換して record
+    session.on("modeSwitched", (mode: AgentMode) => {
+      const event: ModeSwitchedEvent = {
+        type: "mode_switched",
+        source: "protocol",
+        confidence: "high",
+        payload: { mode },
       };
       this.record(sessionId, event, session);
     });
@@ -174,6 +195,7 @@ GROUP BY session_id;
 | permission_response | status = 'running' |
 | cost_update | tokens_in, tokens_out, cost_usd |
 | context_update | context_percent |
+| mode_switched | agent_mode |
 | error | error（最新エラーを上書き） |
 
 ```typescript
@@ -213,6 +235,10 @@ private materialize(sessionId: SessionId, event: SessionEvent) {
     })
     .case("error", (e) => {
       this.sessionRepo.update(sessionId, { error: e.payload.message });
+    })
+    .case("compact",     () => {})  // レジャーに追記するだけ。通知は maybeNotify で処理
+    .case("mode_switched", (e) => {
+      this.sessionRepo.update(sessionId, { agent_mode: e.payload.mode });
     })
     .case("message",     () => {})  // レジャーに追記するだけ
     .case("tool_use",    () => {})
@@ -260,8 +286,18 @@ private maybeNotify(sessionId: SessionId, event: SessionEvent) {
         }
       }
     })
+    .case("compact", (e) => {
+      this.notificationService.create({
+        session_id: sessionId,
+        type: "context_warning",
+        priority: "high",
+        title: task.title,
+        body: `Context compaction started (${e.payload.reason})`,
+      });
+    })
     .case("status_changed",      () => {})
     .case("permission_response", () => {})
+    .case("mode_switched",       () => {})
     .case("message",             () => {})
     .case("tool_use",            () => {})
     .case("tool_result",         () => {})
@@ -286,6 +322,14 @@ private onExit(sessionId: SessionId, info: ExitInfo) {
     : null;
   this.sessionRepo.update(sessionId, { agent_summary: agentSummary });
 
+  // Auto-generate session title from events.
+  // Uses the first tool_use event's target or first assistant message as a short title.
+  // This distinguishes multiple sessions within the same task (e.g. "Edit auth.ts" vs "Fix CI pipeline").
+  const title = this.generateSessionTitle(sessionId);
+  if (title) {
+    this.sessionRepo.update(sessionId, { title });
+  }
+
   if (info.code === 0) {
     this.notificationService.create({
       session_id: sessionId,
@@ -306,6 +350,36 @@ private onExit(sessionId: SessionId, info: ExitInfo) {
 }
 ```
 
+### セッションタイトル自動生成
+
+```typescript
+/**
+ * Generate a short session title from events.
+ * Priority: first meaningful tool_use target > first assistant message > null.
+ * Inspired by OpenCode's hidden "Title" agent, but simpler — no LLM call.
+ */
+private generateSessionTitle(sessionId: SessionId): string | null {
+  // Try first Edit/Write tool_use for a file-based title
+  const firstEdit = this.eventRepo.findFirstByType(sessionId, "tool_use", (e) =>
+    ["Edit", "Write"].includes(e.payload.tool) && !!e.payload.args.file_path
+  );
+  if (firstEdit) {
+    const file = firstEdit.payload.args.file_path!.split("/").pop()!;
+    return `${firstEdit.payload.tool} ${file}`;
+  }
+
+  // Fallback: first assistant message, truncated
+  const firstMsg = this.eventRepo.findFirstByType(sessionId, "message", (e) =>
+    e.payload.role === "assistant"
+  );
+  if (firstMsg) {
+    return firstMsg.payload.content.slice(0, 60).replace(/\n/g, " ");
+  }
+
+  return null;
+}
+```
+
 ---
 
 ## WebSocket Push
@@ -323,6 +397,7 @@ type WsMessage =
   | { type: "session_event"; sessionId: SessionId; event: SessionEventPayload }
   | { type: "status_changed"; sessionId: SessionId; status: SessionStatus; taskId: TaskId }
   | { type: "context_update"; sessionId: SessionId; contextPercent: number }
+  | { type: "mode_switched"; sessionId: SessionId; mode: AgentMode }
   | { type: "notification"; notification: NotificationPayload }
   | { type: "notification_read"; notificationId: number }
   | { type: "task_created"; task: TaskPayload }

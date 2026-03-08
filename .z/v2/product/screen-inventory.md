@@ -189,7 +189,9 @@ banto の中核。「3 秒で全状況把握」を実現する画面。
 | History                                          [show all]  |
 | +----------------------------------------------------------+ |
 | | #2  (red) failed   CC    3m    exit 1       2h ago       | |
+| |     "Fix CI pipeline"                                    | |
 | | #1  (check) done   CC    8m    +42 -12      5h ago       | |
+| |     "Edit auth.ts"                                       | |
 | +----------------------------------------------------------+ |
 +-------------------------------------------------------------+
 ```
@@ -212,6 +214,7 @@ banto の中核。「3 秒で全状況把握」を実現する画面。
 | 要素 | 説明 |
 |------|------|
 | 試行番号 | #2, #1（新しい順） |
+| セッションタイトル | "Edit auth.ts"（自動生成。NULL なら非表示） |
 | ステータス | (red) failed / (check) done |
 | エージェント + 所要時間 | CC . 3m |
 | 結果サマリー | exit 1（failed）/ +42 -12（done） |
@@ -242,11 +245,11 @@ banto の中核。「3 秒で全状況把握」を実現する画面。
 +-------------------------------------------------------------+
 | <- Fix auth bug                     (orange) waiting  [Stop] |
 +-------------------------------------------------------------+
-| CC . feat/auth . 12m . 14k/9k tokens . ~$0.12 . ctx 78%    |
+| CC . [Build|Plan] . feat/auth . 12m . 14k/9k . ~$0.12 . ctx 78% |
 +-------------------------------------------------------------+
 ```
 
-ステータスバー要素: エージェント名 / ブランチ / 経過時間 / トークン / コスト推計 / ctx %
+ステータスバー要素: エージェント名 / **モード (Build/Plan)** / ブランチ / 経過時間 / トークン / コスト推計 / ctx %
 
 ### モード A: ターミナルビュー（mode: "terminal"）
 
@@ -345,6 +348,8 @@ Codex (app-server), ACP 用。
 | permission_request | !! + ツール + 対象 + [Approve] | 14:05 !! Permission: Write(package.json) |
 | status_changed | * + 新ステータス | 14:06 * done (exit 0) |
 | error | x + メッセージ | 14:06 x Process exited with code 1 |
+| compact | ~ + reason | 14:06 ~ Context compaction started |
+| mode_switched | * + mode | 14:06 * Switched to Plan mode |
 | cost_update | $ + トークン | 14:06 $ 14k in / 9k out |
 
 ### 完了後の追加表示
@@ -390,6 +395,11 @@ Codex (app-server), ACP 用。
 - mode: `terminal` | `structured`
 - resume: `true` | `false`
 - permissions: `true` | `false`
+- modeSwitching: `true` | `false`
+
+**初期モード選択**: modeSwitching 対応エージェントの場合、Build / Plan のトグルを表示。デフォルト: Build。
+Plan を選ぶと読み取り専用で探索・分析のみ。Build は通常の全アクセス開発モード。
+OpenCode の Tab キー UX 同様、ユーザーは S3 ステータスバーから mid-session で切替可能。
 
 ---
 

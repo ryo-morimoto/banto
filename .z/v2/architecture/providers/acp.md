@@ -20,6 +20,7 @@ const acpProvider: NonResumableProvider = {
   name: "OpenCode",
   mode: "structured",
   resume: false,
+  modeSwitching: false,  // Determined dynamically via ACP session/set_mode capability
   check: () => { ... },
   createSession: (config) => { ... },
 };
@@ -184,6 +185,25 @@ private async handlePermissionRequest(params: {
   return { outcome: { outcome: "selected", optionId } };
 }
 ```
+
+---
+
+## Mode Switching
+
+ACP supports `session/set_mode` as an optional capability. Agents like OpenCode expose "ask" (plan) and "code" (build) modes.
+
+```typescript
+async switchMode(mode: AgentMode): Promise<void> {
+  const acpMode = mode === "plan" ? "ask" : "code";
+  await this.connection.request("session/set_mode", {
+    sessionId: this.acpSessionId,
+    mode: acpMode,
+  });
+  this.emit("modeSwitched", mode);
+}
+```
+
+**Dynamic capability**: `modeSwitching` is determined after `initialize` by checking if the agent's capabilities include session mode support. The ACP registry or agent config can override this.
 
 ---
 

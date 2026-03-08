@@ -530,3 +530,78 @@
 | 0-70% | 通常（グレー） | 表示のみ |
 | 70-90% | 黄色 | 注意喚起 |
 | 90%+ | 赤 | 通知送信。ユーザー判断を促す |
+
+---
+
+## F12: Agent Mode Switching (Build/Plan)
+
+> "Tab to switch agents is brilliant UX" -- OpenCode が最も称賛された操作パターン
+> "Send out a scout. Hand the AI agent a task just to find out where the sticky bits are" -- Josh Bleecher Snyder
+
+```
+ユーザー                      banto                         エージェント
+  |                            |                              |
+  | S3 ステータスバーの          |                              |
+  | [Build|Plan] トグルクリック  |                              |
+  +-------------------------->|                              |
+  |                            | POST /sessions/:id/mode      |
+  |                            |  { mode: "plan" }            |
+  |                            |                              |
+  |                            | session.switchMode("plan")   |
+  |                            +----------------------------->|
+  |                            |                              | モード切替
+  |                            |                              | (CC: /plan, ACP: session/set_mode)
+  |                            |<-----------------------------+
+  |                            | emit("modeSwitched", "plan") |
+  |                            |                              |
+  |                            | session_events INSERT        |
+  |                            |  (mode_switched, "plan")     |
+  |                            | sessions UPDATE              |
+  |                            |  (agent_mode = "plan")       |
+  |                            | WS push: mode_switched       |
+  |                            +----------------------------->|
+  |                            |                              |
+  |                            |                              | StatusBar: [Plan] がアクティブ
+  |                            |                              | Timeline: * Switched to Plan mode
+```
+
+**Build モード**: フルアクセス。Edit, Write, Bash すべて実行可能。通常の開発。
+**Plan モード**: 読み取り専用。Read, Glob, Grep のみ。コード変更なしで探索・分析。TH5 (scout) のユースケースに対応。
+
+**初期モード**: S5 実行開始モーダルで選択。modeSwitching 対応エージェントの場合のみトグル表示。デフォルト: Build。
+
+**非対応エージェント**: Codex, 一部 ACP エージェントは mode switching 非対応。StatusBar のトグルは disabled 表示。
+
+---
+
+## F13: Context Compaction Notification
+
+> "Claude Code compaction silently destroyed 4 hours of my work" -- DEV Community
+> CC PreCompact hook で圧縮を事前検知
+
+```
+エージェント                   banto                         ユーザー
+  |                            |                              |
+  | PreCompact hook 発火        |                              |
+  +-------------------------->|                              |
+  |                            | session_events INSERT        |
+  |                            |  (compact, reason: "auto")   |
+  |                            | notifications INSERT         |
+  |                            |  (type: context_warning,     |
+  |                            |   priority: high,            |
+  |                            |   body: "Context compaction  |
+  |                            |    started (auto)")          |
+  |                            | WS push: session_event       |
+  |                            | Push 通知送信                 |
+  |                            +----------------------------->|
+  |                            |                              |
+  |                            |                              | S3 Timeline:
+  |                            |                              |  ~ Context compaction started
+  |                            |                              | Push 通知で認知
+  |                            |                              |
+  |                            |                              | ユーザー判断:
+  |                            |                              |  - 放置（圧縮を許容）
+  |                            |                              |  - Stop → 成果確認 → 新しい実行
+```
+
+**compact イベントの意義**: context_update (90%+) とは異なり、compact は「圧縮が実際に始まった」ことを示す。圧縮によりコンテキストが失われるリスクをユーザーに伝え、Stop するかの判断材料を提供する。

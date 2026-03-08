@@ -155,6 +155,9 @@ interface BaseSession extends EventEmitter<AgentSessionEvents> {
   readonly provider: AgentProvider;
   readonly resume: boolean;
 
+  /** Current agent mode (build = full access, plan = read-only). Null if agent doesn't support mode switching. */
+  readonly agentMode: AgentMode | null;
+
   start(prompt: string): Promise<void>;
   stop(): Promise<void>;
   dispose(): void;
@@ -177,6 +180,10 @@ type TerminalSession = BaseSession & {
 
   /** PTY サイズ変更 */
   resizeTerminal(cols: number, rows: number): void;
+
+  /** Switch agent mode (build/plan). Only available if provider.modeSwitching is true.
+   *  For terminal sessions, this writes the mode switch command to PTY (e.g. "/plan" or "/build"). */
+  switchMode?(mode: AgentMode): Promise<void>;
 };
 ```
 
@@ -193,6 +200,10 @@ type StructuredSession = BaseSession & {
 
   /** 権限リクエストに応答 */
   respondToPermission(requestId: RequestId, decision: PermissionDecision): Promise<void>;
+
+  /** Switch agent mode (build/plan). Only available if provider.modeSwitching is true.
+   *  For structured sessions, uses protocol-specific method (e.g. session/set_mode for ACP). */
+  switchMode?(mode: AgentMode): Promise<void>;
 };
 ```
 
@@ -234,6 +245,7 @@ type ごとに payload の型が確定する。`Record<string, unknown>` や `as
 ```typescript
 type EventSource = "hook" | "protocol" | "mcp" | "process" | "heuristic" | "user" | "auto";
 type Confidence = "high" | "medium" | "low";
+type AgentMode = "build" | "plan";
 
 type AgentEvent =
   | MessageEvent
@@ -242,6 +254,7 @@ type AgentEvent =
   | PermissionRequestEvent
   | CostUpdateEvent
   | ContextUpdateEvent
+  | CompactEvent
   | ErrorEvent;
 
 type MessageEvent = {
@@ -318,6 +331,16 @@ type ContextUpdateEvent = {
   };
 };
 
+type CompactEvent = {
+  type: "compact";
+  source: EventSource;
+  confidence: Confidence;
+  payload: {
+    reason: "auto" | "manual";
+    contextPercentBefore?: number;
+  };
+};
+
 type ErrorEvent = {
   type: "error";
   source: EventSource;
@@ -343,6 +366,7 @@ function summarize(event: AgentEvent): string {
     .case("permission_request", (e) => `Permission: ${e.payload.tool}`)
     .case("cost_update",        (e) => `${e.payload.tokens_in} in / ${e.payload.tokens_out} out`)
     .case("context_update",     (e) => `ctx ${e.payload.context_percent}%`)
+    .case("compact",            (e) => `Compacting context (${e.payload.reason})`)
     .case("error",              (e) => e.payload.message)
     .exhaustive();
 }
@@ -360,6 +384,7 @@ function handleEvent(event: AgentEvent) {
     .case("tool_result",        () => {})
     .case("cost_update",        () => {})
     .case("context_update",     () => {})
+    .case("compact",            (e) => showCompactWarning(e.payload.reason))
     .case("error",              (e) => showError(e.payload.message))
     .exhaustive();
 }
@@ -378,6 +403,7 @@ type BaseProvider = {
   readonly id: ProviderId;
   readonly name: string;
   readonly mode: "terminal" | "structured";
+  readonly modeSwitching: boolean;  // supports build/plan mode switching
 
   check(): Promise<string | null>;
   createSession(config: SessionConfig): AgentSession;
@@ -395,12 +421,12 @@ type NonResumableProvider = BaseProvider & {
 
 **プロバイダー別の型:**
 
-| Provider | 型 | mode | resume |
-|----------|-----|------|--------|
-| Claude Code | ResumableProvider | "terminal" | true |
-| Codex | ResumableProvider | "structured" | true |
-| ACP | ResumableProvider or NonResumableProvider | "structured" | agent 依存 |
-| PTY Fallback | NonResumableProvider | "terminal" | false |
+| Provider | 型 | mode | resume | modeSwitching |
+|----------|-----|------|--------|---------------|
+| Claude Code | ResumableProvider | "terminal" | true | true (Plan mode via `/plan`, `/build`) |
+| Codex | ResumableProvider | "structured" | true | false |
+| ACP | ResumableProvider or NonResumableProvider | "structured" | agent 依存 | agent 依存 (`session/set_mode` capability) |
+| PTY Fallback | NonResumableProvider | "terminal" | false | false |
 
 **使用例:**
 
@@ -433,6 +459,7 @@ type SessionConfig = {
   prompt: string;
   projectPath: string;
   worktreePath?: string;
+  initialMode?: AgentMode;  // default: "build". Only effective if provider.modeSwitching is true
 };
 
 type TerminalSessionConfig = SessionConfig & {
@@ -462,6 +489,7 @@ type AgentSessionEvents = {
   status: (status: AgentStatus) => void;
   event: (event: AgentEvent) => void;
   exit: (info: ExitInfo) => void;
+  modeSwitched: (mode: AgentMode) => void;
 };
 
 type AgentStatusType = "running" | "waiting_permission" | "idle";
@@ -600,6 +628,7 @@ type AvailableProvider = {
   name: string;
   mode: "terminal" | "structured";
   resume: boolean;
+  modeSwitching: boolean;
 };
 ```
 

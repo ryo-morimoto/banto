@@ -16,6 +16,7 @@ const codexProvider: ResumableProvider = {
   name: "Codex",
   mode: "structured",
   resume: true,
+  modeSwitching: false,  // Codex does not support plan/build mode switching
   check: () => { ... },
   createSession: (config) => { ... },
   resumeSession: (config) => { ... },

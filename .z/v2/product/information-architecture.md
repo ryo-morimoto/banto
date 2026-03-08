@@ -68,8 +68,10 @@ done → active（再度作業する場合）
 | task_id | TEXT (FK) | 所属タスク |
 | agent_provider | TEXT | プロバイダー識別子 |
 | agent_session_id | TEXT | エージェント側のセッション/スレッド ID |
+| title | TEXT | セッション内容の自動生成タイトル。完了時に保存。NULL = 未生成 |
 | status | ENUM | pending / running / waiting_permission / done / failed |
 | status_confidence | ENUM | high / medium / low |
+| agent_mode | ENUM | build / plan。NULL = モード切替非対応 |
 | context_percent | INTEGER | コンテキスト使用率 (0-100)。NULL = 不明 |
 | agent_summary | TEXT | エージェントの最終メッセージ要約。完了時に保存 |
 | diff_summary | JSON | git diff 集計。`{files: [{path, additions, deletions}], total_additions, total_deletions}` |
@@ -91,6 +93,8 @@ done → active（再度作業する場合）
 
 | 属性 | 根拠 |
 |------|------|
+| title | OpenCode: hidden "Title" agent でセッションタイトルを自動生成。同一タスク内の複数実行を区別するために必要。S2 実行履歴で "#2 Edit auth.ts" のように表示 |
+| agent_mode | OpenCode: Plan/Build モード切替が最も称賛された UX。Plan = 読み取り専用探索、Build = フルアクセス開発。mid-session で切替可能 |
 | context_percent | Marc Nuri: 「次にどこを見るべきか」の最良予測指標。S1 カード・S3 ステータスバーに表示。F11 の閾値判定に使用 |
 | agent_summary | Simon Willison: "Reviewing code that lands on your desk out of nowhere is a lot of work"。S3 Summary セクションで diff 前にコンテキスト提供。F5 完了フロー |
 | diff_summary | CodeRabbit: AI PRs は 1.7x more issues。レビュー負荷軽減のため S1 カード・S3 Summary に diff stats を即表示。F5 完了フロー |
@@ -152,12 +156,16 @@ pending → failed（起動失敗）
 | error | エラー発生 | 全プロバイダー |
 | cost_update | トークン/コスト更新 | protocol / hook |
 | context_update | コンテキスト使用率更新 | protocol / hook |
+| compact | コンテキスト圧縮の開始 | hook (CC PreCompact) |
+| mode_switched | エージェントモード切替 (build/plan) | protocol / user |
 
 **新規イベント種別の根拠:**
 
 | type | 根拠 |
 |------|------|
 | context_update | F11: コンテキスト枯渇警告。Marc Nuri の指標。context_percent 変化時に発火 |
+| compact | CC PreCompact hook で検出。"Claude Code compaction silently destroyed 4 hours of my work" (DEV Community)。圧縮前にユーザーに通知し判断を促す |
+| mode_switched | OpenCode: Plan/Build モード切替。エージェントのアクセスレベルが変わる重要なイベント。タイムラインに表示 |
 
 ### Notification
 
@@ -303,3 +311,5 @@ DB に直接保存せず、表示時に導出するデータ。
 | プロジェクト内タスク数 | tasks WHERE project_id = X のカウント | S1 | PJ グループヘッダー |
 | 最新イベント要約 | events ORDER BY seq DESC LIMIT 1 (per session) | S2 | MO6: "今エージェントが何をしているか" |
 | アクティブセッション | sessions WHERE task_id = X AND status IN (pending, running, waiting_permission) | S2 | 同時最大 1 の制約 |
+| モードラベル | session.agent_mode → "Build" / "Plan" / null | S3 ステータスバー | modeSwitching 対応時のみ表示 |
+| セッションタイトル | session.title (自動生成 or null) | S2 実行履歴 | 試行 #N の下に表示 |
